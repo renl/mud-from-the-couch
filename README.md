@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # telnetclient
 
 FIXME: description
@@ -34,3 +35,7 @@ Copyright © 2016 FIXME
 
 Distributed under the Eclipse Public License either version 1.0 or (at
 your option) any later version.
+=======
+# durismud-client-in-clojure
+Duris mud client written in clojure
+>>>>>>> 5ed0f2d4adca2ce8b7b59d8b234005ea91de618e
