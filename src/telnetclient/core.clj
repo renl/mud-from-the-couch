@@ -65,6 +65,11 @@
        (case c
          :enter (parse-cmd)
          :up (prev-cmd)
+         :backspace (do (swap! key-buffer pop)
+                        (t/clear term-input)
+                        (t/put-string
+                         term-input
+                         (apply str @key-buffer)))
          (do (swap! key-buffer conj c)
              (t/put-character term-input c)))))
    (println "Stopping receive-cmd")))
