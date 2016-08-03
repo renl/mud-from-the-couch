@@ -1,10 +1,32 @@
 (ns telnetclient.core
-  (:require [lanterna.terminal :as t])
+  (:require [telnetclient.trigger :refer [run-triggers]]
+            [lanterna.terminal :as t]
+            [clojure.core.async :refer [<! >! <!! >!! chan go close!]])
   (:import [org.apache.commons.net.telnet TelnetClient TerminalTypeOptionHandler EchoOptionHandler SuppressGAOptionHandler])
   (:gen-class))
 
-(def running (atom true))
 
+
+;; App states
+;; ================================================================================
+(def running (atom true))
+(def key-buffer (atom []))
+(def cmd-buffer (atom []))
+(def in-buf (byte-array 1024))
+(def screen-buffer (atom ""))
+(def client-mods (atom (read-string (slurp "resources/slurp.edn"))))
+(def log (atom []))
+
+;; Async channel
+;; ================================================================================
+(def screen-chan (chan))
+(def key-stroke-chan (chan))
+(def cmd-chan (chan))
+
+
+
+;; Client config
+;; ================================================================================
 (def tc
   (doto (TelnetClient.)
     (.addOptionHandler (TerminalTypeOptionHandler. "VT100" false false true false))
@@ -14,80 +36,127 @@
 
 (.connect tc "mud.durismud.com" 7777)
 
+
+
+
+;; Streams
+;; ================================================================================
 (def ips (.getInputStream tc))
 (def ops (.getOutputStream tc))
-(def in-buf (byte-array 1024))
 
-(def terminal-size (ref [0 0]))
 
-(defn handle-resize [cols rows]
-  (dosync (ref-set terminal-size [cols rows])))
 
+
+;; Terminals
+;; ================================================================================
 (def term-input (t/get-terminal
-           :swing
-           {:resize-listener handle-resize
-            :cols 80
-            :rows 2}))
+                 :swing
+                 {:cols 80
+                  :rows 1
+                  :palette :gnome}))
 
+;; (def term-output (t/get-terminal
+;;                   :unix))
 (def term-output (t/get-terminal
-                  :unix))
+                  :text
+                  {:palette :gnome}))
 
-(def key-buffer (atom []))
-(def cmd-buffer (atom []))
 
-(defn send-cmd []
-  (let [out-buf (byte-array (map (comp byte int) @key-buffer))
-        i (count @key-buffer)]
-    (.write ops out-buf 0 i)
-    (.flush ops)
-    (t/clear term-input)
-    (swap! cmd-buffer conj @key-buffer)
-    (reset! key-buffer [])))
+;; Producers
+;; ================================================================================
+(defn server-output-receiver []
+  (while @running
+    (Thread/sleep 100)
+    (loop [recv-str ""]
+      (let [j (.available ips)]
+        (if (> j 0)
+          (let [i (.read ips in-buf 0 (if (> j 1024) 1024 j))] 
+            (recur (str recv-str (String. in-buf 0 i))))
+          (if (not-empty recv-str)
+            (do (swap! log conj (count recv-str)) (>!! screen-chan recv-str)))))))
+  (println "Stopping print-server-output"))
 
 (defn parse-cmd []
-  (cond
-    (= "quit" (apply str @key-buffer)) (do (reset! running false) (shutdown-agents))
-    :else (do
-            (swap! key-buffer conj \newline)
-            (future (send-cmd)))))
+  (if-let [alias-cmd ((@client-mods :alias) (apply str @key-buffer))]
+    (>!! cmd-chan alias-cmd)
+    (let [cmd-txt (apply str @key-buffer)]
+      (case cmd-txt
+        "#quit" (do
+                  (spit "resources/log.txt" (str @log))
+                  (reset! running false)
+                  (close! screen-chan)
+                  (shutdown-agents))
+        "#load" (reset! client-mods (read-string (slurp "resources/slurp.edn")))
+        (>!! cmd-chan cmd-txt)))))
+
+;; Consumers
+;; ================================================================================
+(defn server-output-printer []
+  (t/in-terminal
+   term-output
+   (while @running
+     (let [recv-str (<!! screen-chan)]
+       (t/put-string term-output recv-str)
+       (swap! screen-buffer str recv-str))))
+  (println "Stopping consume-recv-str"))
+
+(defn cmd-sender []
+  (while @running
+    (let [cmd (<!! cmd-chan)
+          cmd-vec (vec (str cmd \newline))
+          out-buf (byte-array (map (comp byte int) cmd-vec))
+          i (count cmd-vec)]
+      (.write ops out-buf 0 i)
+      (.flush ops)
+      (swap! cmd-buffer conj cmd)
+      (reset! key-buffer [])))
+  (println "Stopping cmd-sender"))
+
+
+
+
+
+
+
+;; Functions
+;; ================================================================================
 
 (defn prev-cmd []
-  (reset! key-buffer (pop (peek @cmd-buffer)))
+  (reset! key-buffer (peek @cmd-buffer))
   (t/clear term-input)
   (t/put-string term-input (apply str @key-buffer))
   (swap! cmd-buffer pop))
 
-(defn receive-cmd []
+(defn key-stroke-capturer []
   (t/in-terminal
    term-input
    (while @running
      (let [c (t/get-key-blocking term-input)]
        (case c
-         :enter (parse-cmd)
+         :enter (do (t/clear term-input) (parse-cmd))
          :up (prev-cmd)
-         :backspace (do (swap! key-buffer pop)
+         :backspace (do (swap! key-buffer #(if (empty? %) % (pop %)))
                         (t/clear term-input)
-                        (t/put-string
-                         term-input
-                         (apply str @key-buffer)))
+                        (t/put-string term-input (apply str @key-buffer)))
          (do (swap! key-buffer conj c)
              (t/put-character term-input c)))))
-   (println "Stopping receive-cmd")))
+   (println "Stopping key-stroke-capturer")))
 
-(defn print-server-output []
-  (t/in-terminal
-   term-output
-   (while @running
-     (let [j (.available ips)]
-       (if (> j 1024)
-         (let [i (.read ips in-buf 0 1024)]
-           (t/put-string term-output (String. in-buf 0 i)))
-         (let [i (.read ips in-buf 0 j)]
-           (t/put-string term-output (String. in-buf 0 i))))))
-   (println "Stopping print-server-output")))
 
-(future (receive-cmd))
-(future (print-server-output))
+
+
+
+
+
+
+
+
+;; Start threads
+;; ================================================================================
+(future (key-stroke-capturer))
+(future (server-output-receiver))
+(future (server-output-printer))
+(future (cmd-sender))
 
 (defn -main
   [& args]

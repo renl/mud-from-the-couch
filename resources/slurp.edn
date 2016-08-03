@@ -1,0 +1,5 @@
+{:alias {"op" "open door"
+         "gt" "gsay"
+         "rd" "round drow"
+         }
+ :triggers []}
