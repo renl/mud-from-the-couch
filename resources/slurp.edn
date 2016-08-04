@@ -2,8 +2,19 @@
          "gt" "gsay"
          "rd" "round drow"
          }
- :trigger [[
-            #"You lose your footing and fall to your knees!"
-            (fn [_]
-              (>!! cmd-chan "st")
-              (t/put-string term-output "\n  STANDING\n"))]]}
+ :trigger [
+           [#"You lose your footing and fall to your knees!"
+            (fn [_] (>!! cmd-chan "st"))]
+           
+           [#"Your basic stats:"
+            (fn [_] (swap! client-mods assoc :stat-counter 0))]
+
+           [#"very good"
+            (fn [_] (swap! client-mods update :stat-counter inc))]
+
+           [#"Do you want to reroll"
+            (fn [_] (let [cnt (@client-mods :stat-counter)]
+                      (println "Very good count: " cnt)
+                      (if (< cnt 3)
+                        (>!! cmd-chan "y"))))]
+           ]}

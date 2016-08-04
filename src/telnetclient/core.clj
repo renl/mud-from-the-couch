@@ -1,7 +1,11 @@
 (ns telnetclient.core
   (:require [lanterna.terminal :as t]
             [clojure.core.async :refer [<! >! <!! >!! chan go close!]])
-  (:import [org.apache.commons.net.telnet TelnetClient TerminalTypeOptionHandler EchoOptionHandler SuppressGAOptionHandler])
+  (:import [org.apache.commons.net.telnet
+            TelnetClient
+            TerminalTypeOptionHandler
+            EchoOptionHandler
+            SuppressGAOptionHandler])
   (:gen-class))
 
 (declare parse-cmd cmd-chan term-output)
@@ -9,10 +13,10 @@
 ;; App states
 ;; ================================================================================
 (def running (atom true))
-(def key-buffer (atom []))
+(def key-buffer (atom ""))
 (def cmd-buffer (atom []))
 (def in-buf (byte-array 1024))
-(def screen-buffer (atom ""))
+(def screen-buffer (atom []))
 (def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
 (def log (atom []))
 
@@ -70,16 +74,16 @@
 ;; ================================================================================
 
 (defn check-alias []
-  ((@client-mods :alias) (apply str @key-buffer)))
+  ((@client-mods :alias) @key-buffer))
 
 (defn prev-cmd []
   (reset! key-buffer (peek @cmd-buffer))
   (t/clear term-input)
-  (t/put-string term-input (apply str @key-buffer))
+  (t/put-string term-input @key-buffer)
   (swap! cmd-buffer pop))
 
 (defn handle-key-stroked [c]
-  (swap! key-buffer conj c)
+  (swap! key-buffer str c)
   (t/put-character term-input c))
 
 (defn key-stroke-capturer []
@@ -88,29 +92,37 @@
    (while @running
      (let [c (t/get-key-blocking term-input)]
        (case c
-         :enter (do (t/clear term-input) (parse-cmd))
+         :escape nil
+         :backspace (do (swap! key-buffer (comp (partial apply str) butlast))
+                        (t/clear term-input)
+                        (t/put-string term-input @key-buffer))
+         :left nil
+         :right nil
          :up (prev-cmd)
+         :down nil
+         :insert nil
+         :delete nil
+         :home nil
+         :end nil
+         :page-up nil
+         :page-down nil
+         :tab nil
+         :reverse-tab nil
+         :enter (do (t/clear term-input) (parse-cmd))
          \space (if-let [alias-cmd (check-alias)]
-                  (do (reset! key-buffer (conj (vec alias-cmd) \space))
+                  (do (reset! key-buffer (str alias-cmd \space))
                       (t/clear term-input)
                       (t/put-string term-input (str alias-cmd \space)))
                   (handle-key-stroked \space))
-         :backspace (do (swap! key-buffer #(if (empty? %) % (pop %)))
-                        (t/clear term-input)
-                        (t/put-string term-input (apply str @key-buffer)))
          (handle-key-stroked c))))
    (println "Stopping key-stroke-capturer")))
-
-
-
-
 
 
 
 (defn parse-cmd []
   (if-let [alias-cmd (check-alias)]
     (>!! cmd-chan alias-cmd)
-    (let [cmd-txt (apply str @key-buffer)]
+    (let [cmd-txt @key-buffer]
       (case cmd-txt
         "#quit" (do
                   (spit "resources/log.txt" (str @log))
@@ -134,29 +146,46 @@
             (>!! screen-chan recv-str))))))
   (println "Stopping print-server-output"))
 
+(defn print-to-screen [buf]
+  (t/clear term-output)
+  (dorun (map-indexed
+          (fn [line string]
+            (t/put-string term-output string 0 line))
+          buf)))
 
+(defn handle-screen-buffer [lines]
+  (swap! screen-buffer #(vec (take-last 5000 (apply conj %1 %2))) lines))
 
 (defn server-output-printer []
   (t/in-terminal
    term-output
    (while @running
      (let [recv-str (<!! screen-chan)
+           recv-str-split (clojure.string/split-lines recv-str)
            decolored-recv-str (clojure.string/replace recv-str #"\u001b\[[^m]+m" "")]
-       (t/put-string term-output recv-str)
-       (swap! screen-buffer str decolored-recv-str)
+       (handle-screen-buffer recv-str-split)
+       (print-to-screen (take-last 40 @screen-buffer))
        (>!! trigger-chan decolored-recv-str))))
   (println "Stopping consume-recv-str"))
+
+
+(defn re-to-act [buf]
+  (fn [[re act]]
+    (dorun (map act (re-seq re buf)))))
 
 
 (defn handle-triggers []
   (while @running
     (let [triggers (@client-mods :trigger)
           buf (<!! trigger-chan)]
-      (doall (for [[regex action] triggers]
-               (doall (for [[_ & grps] (re-seq regex buf)]
-                        (action grps))))))))
+      (dorun
+       (map (re-to-act buf) triggers))))
+  (println "Stopping trigger handlers"))
 
 
+(defn handle-cmd-history [cmd]
+  (swap! cmd-buffer #(vec (take-last 50 (conj %1 %2))) cmd)
+  (reset! key-buffer ""))
 
 
 (defn cmd-sender []
@@ -167,19 +196,8 @@
           i (count cmd-vec)]
       (.write ops out-buf 0 i)
       (.flush ops)
-      (swap! cmd-buffer conj cmd)
-      (reset! key-buffer [])))
+      (handle-cmd-history cmd)))
   (println "Stopping cmd-sender"))
-
-
-
-
-
-
-
-
-
-
 
 
 
