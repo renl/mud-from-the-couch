@@ -14,7 +14,8 @@
 ;; ================================================================================
 (def running (atom true))
 (def key-buffer (atom ""))
-(def cmd-buffer (atom []))
+(def cmd-buffer (atom {:history '()
+                       :pointer 1}))
 (def in-buf (byte-array 1024))
 (def screen-buffer (atom []))
 (def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
@@ -67,20 +68,25 @@
 
 
 
-
-
-
 ;; Functions
 ;; ================================================================================
 
 (defn check-alias []
   ((@client-mods :alias) @key-buffer))
 
-(defn prev-cmd []
-  (reset! key-buffer (peek @cmd-buffer))
+
+(defn next-cmd []
+  (swap! cmd-buffer update :pointer #(if (< % 0) 0 (dec %)))
+  (reset! key-buffer (last (take (@cmd-buffer :pointer) (@cmd-buffer :history))))
   (t/clear term-input)
-  (t/put-string term-input @key-buffer)
-  (swap! cmd-buffer pop))
+  (t/put-string term-input @key-buffer))
+
+
+(defn prev-cmd []
+  (swap! cmd-buffer update :pointer inc)
+  (reset! key-buffer (last (take (@cmd-buffer :pointer) (@cmd-buffer :history))))  
+  (t/clear term-input)
+  (t/put-string term-input @key-buffer))
 
 (defn handle-key-stroked [c]
   (swap! key-buffer str c)
@@ -99,7 +105,7 @@
          :left nil
          :right nil
          :up (prev-cmd)
-         :down nil
+         :down (next-cmd)
          :insert nil
          :delete nil
          :home nil
@@ -184,7 +190,10 @@
 
 
 (defn handle-cmd-history [cmd]
-  (swap! cmd-buffer #(vec (take-last 50 (conj %1 %2))) cmd)
+  (swap! cmd-buffer (fn [m]
+                      (-> m
+                          (update :history conj cmd)
+                          (assoc :pointer 1))))
   (reset! key-buffer ""))
 
 
