@@ -3,6 +3,11 @@
          "rd" "round drow"
          }
  :trigger [
+           [#"< ([0-9]+)h/[0-9]+H ([0-9]+)v/[0-9]+V Pos: [a-zA-Z]+ >"
+            (fn [[_ hp mv]]
+              (swap! status-info assoc :hp hp)
+              (swap! status-info assoc :mv mv))]
+           
            [#"You lose your footing and fall to your knees!"
             (fn [_] (>!! cmd-chan "st"))]
            

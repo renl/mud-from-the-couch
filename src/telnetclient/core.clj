@@ -18,8 +18,11 @@
                        :pointer 1}))
 (def in-buf (byte-array 1024))
 (def screen-buffer (atom []))
-(def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
 (def log (atom []))
+(def message-buffer (atom "No new messages"))
+(def status-info (atom {:hp "unknown"
+                        :mv "unknown"}))
+(def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
 
 ;; Async channel
 ;; ================================================================================
@@ -152,12 +155,50 @@
             (>!! screen-chan recv-str))))))
   (println "Stopping print-server-output"))
 
+(defn render-messagebox [x y]
+  (t/set-bg-color term-output :red)
+  (t/move-cursor term-output x y)
+  (doseq [_ (range 50)] (t/put-character term-output \space))
+  (t/move-cursor term-output x (+ y 4))
+  (doseq [_ (range 50)] (t/put-character term-output \space ))
+  (t/set-bg-color term-output :white)
+  (t/set-fg-color term-output :black)
+  (t/move-cursor term-output x (+ y 1))
+  (doseq [_ (range 50)] (t/put-character term-output \space))
+  (t/move-cursor term-output x (+ y 2))
+  (doseq [_ (range 50)] (t/put-character term-output \space ))
+  (t/move-cursor term-output x (+ y 3))
+  (doseq [_ (range 50)] (t/put-character term-output \space ))
+  (t/put-string term-output @message-buffer (+ x 2) (+ y 2))
+  (t/set-bg-color term-output :default)
+  (t/set-fg-color term-output :default))
+
+(defn render-statusbox [x y]
+  (t/set-bg-color term-output :green)
+  (t/move-cursor term-output x y)
+  (doseq [_ (range 50)] (t/put-character term-output \space))
+  (t/move-cursor term-output x (+ y 11))
+  (doseq [_ (range 50)] (t/put-character term-output \space ))
+  (t/set-bg-color term-output :white)
+  (t/set-fg-color term-output :black)
+  (t/move-cursor term-output x (+ y 1))
+  (doseq [xx (range 50)
+          yy (range 10)]
+    (t/move-cursor term-output (+ x xx) (+ y yy 1))
+    (t/put-character term-output \space))
+  (t/put-string term-output (str "HP: " (@status-info :hp)) (+ x 2) (+ y 2))
+  (t/put-string term-output (str "MOVES: " (@status-info :mv)) (+ x 2) (+ y 4))  
+  (t/set-bg-color term-output :default)
+  (t/set-fg-color term-output :default))
+
 (defn print-to-screen [buf]
   (t/clear term-output)
   (dorun (map-indexed
           (fn [line string]
             (t/put-string term-output string 0 line))
-          buf)))
+          buf))
+  (render-messagebox 90 5)
+  (render-statusbox 90 10))
 
 (defn handle-screen-buffer [lines]
   (swap! screen-buffer #(vec (take-last 5000 (apply conj %1 %2))) lines))
