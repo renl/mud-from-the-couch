@@ -1,11 +1,10 @@
 (ns telnetclient.core
-  (:require [telnetclient.trigger :refer [run-triggers]]
-            [lanterna.terminal :as t]
+  (:require [lanterna.terminal :as t]
             [clojure.core.async :refer [<! >! <!! >!! chan go close!]])
   (:import [org.apache.commons.net.telnet TelnetClient TerminalTypeOptionHandler EchoOptionHandler SuppressGAOptionHandler])
   (:gen-class))
 
-
+(declare parse-cmd cmd-chan term-output)
 
 ;; App states
 ;; ================================================================================
@@ -14,7 +13,7 @@
 (def cmd-buffer (atom []))
 (def in-buf (byte-array 1024))
 (def screen-buffer (atom ""))
-(def client-mods (atom (read-string (slurp "resources/slurp.edn"))))
+(def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
 (def log (atom []))
 
 ;; Async channel
@@ -22,7 +21,7 @@
 (def screen-chan (chan))
 (def key-stroke-chan (chan))
 (def cmd-chan (chan))
-
+(def trigger-chan (chan))
 
 
 ;; Client config
@@ -62,8 +61,67 @@
                   {:palette :gnome}))
 
 
-;; Producers
+
+
+
+
+
+;; Functions
 ;; ================================================================================
+
+(defn check-alias []
+  ((@client-mods :alias) (apply str @key-buffer)))
+
+(defn prev-cmd []
+  (reset! key-buffer (peek @cmd-buffer))
+  (t/clear term-input)
+  (t/put-string term-input (apply str @key-buffer))
+  (swap! cmd-buffer pop))
+
+(defn handle-key-stroked [c]
+  (swap! key-buffer conj c)
+  (t/put-character term-input c))
+
+(defn key-stroke-capturer []
+  (t/in-terminal
+   term-input
+   (while @running
+     (let [c (t/get-key-blocking term-input)]
+       (case c
+         :enter (do (t/clear term-input) (parse-cmd))
+         :up (prev-cmd)
+         \space (if-let [alias-cmd (check-alias)]
+                  (do (reset! key-buffer (conj (vec alias-cmd) \space))
+                      (t/clear term-input)
+                      (t/put-string term-input (str alias-cmd \space)))
+                  (handle-key-stroked \space))
+         :backspace (do (swap! key-buffer #(if (empty? %) % (pop %)))
+                        (t/clear term-input)
+                        (t/put-string term-input (apply str @key-buffer)))
+         (handle-key-stroked c))))
+   (println "Stopping key-stroke-capturer")))
+
+
+
+
+
+
+
+(defn parse-cmd []
+  (if-let [alias-cmd (check-alias)]
+    (>!! cmd-chan alias-cmd)
+    (let [cmd-txt (apply str @key-buffer)]
+      (case cmd-txt
+        "#quit" (do
+                  (spit "resources/log.txt" (str @log))
+                  (reset! running false)
+                  (close! screen-chan)
+                  (shutdown-agents))
+        "#load" (reset! client-mods (eval (read-string (slurp "resources/slurp.edn"))))
+        (>!! cmd-chan cmd-txt)))))
+
+
+
 (defn server-output-receiver []
   (while @running
     (Thread/sleep 100)
@@ -73,32 +131,33 @@
           (let [i (.read ips in-buf 0 (if (> j 1024) 1024 j))] 
             (recur (str recv-str (String. in-buf 0 i))))
           (if (not-empty recv-str)
-            (do (swap! log conj (count recv-str)) (>!! screen-chan recv-str)))))))
+            (>!! screen-chan recv-str))))))
   (println "Stopping print-server-output"))
 
-(defn parse-cmd []
-  (if-let [alias-cmd ((@client-mods :alias) (apply str @key-buffer))]
-    (>!! cmd-chan alias-cmd)
-    (let [cmd-txt (apply str @key-buffer)]
-      (case cmd-txt
-        "#quit" (do
-                  (spit "resources/log.txt" (str @log))
-                  (reset! running false)
-                  (close! screen-chan)
-                  (shutdown-agents))
-        "#load" (reset! client-mods (read-string (slurp "resources/slurp.edn")))
-        (>!! cmd-chan cmd-txt)))))
 
-;; Consumers
-;; ================================================================================
+
 (defn server-output-printer []
   (t/in-terminal
    term-output
    (while @running
-     (let [recv-str (<!! screen-chan)]
+     (let [recv-str (<!! screen-chan)
+           decolored-recv-str (clojure.string/replace recv-str #"\u001b\[[^m]+m" "")]
        (t/put-string term-output recv-str)
-       (swap! screen-buffer str recv-str))))
+       (swap! screen-buffer str decolored-recv-str)
+       (>!! trigger-chan decolored-recv-str))))
   (println "Stopping consume-recv-str"))
+
+
+(defn handle-triggers []
+  (while @running
+    (let [triggers (@client-mods :trigger)
+          buf (<!! trigger-chan)]
+      (doall (for [[regex action] triggers]
+               (doall (for [[_ & grps] (re-seq regex buf)]
+                        (action grps))))))))
+
+
+
 
 (defn cmd-sender []
   (while @running
@@ -118,32 +177,6 @@
 
 
 
-;; Functions
-;; ================================================================================
-
-(defn prev-cmd []
-  (reset! key-buffer (peek @cmd-buffer))
-  (t/clear term-input)
-  (t/put-string term-input (apply str @key-buffer))
-  (swap! cmd-buffer pop))
-
-(defn key-stroke-capturer []
-  (t/in-terminal
-   term-input
-   (while @running
-     (let [c (t/get-key-blocking term-input)]
-       (case c
-         :enter (do (t/clear term-input) (parse-cmd))
-         :up (prev-cmd)
-         :backspace (do (swap! key-buffer #(if (empty? %) % (pop %)))
-                        (t/clear term-input)
-                        (t/put-string term-input (apply str @key-buffer)))
-         (do (swap! key-buffer conj c)
-             (t/put-character term-input c)))))
-   (println "Stopping key-stroke-capturer")))
-
-
-
 
 
 
@@ -157,6 +190,7 @@
 (future (server-output-receiver))
 (future (server-output-printer))
 (future (cmd-sender))
+(future (handle-triggers))
 
 (defn -main
   [& args]

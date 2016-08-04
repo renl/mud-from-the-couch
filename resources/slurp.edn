@@ -2,4 +2,8 @@
          "gt" "gsay"
          "rd" "round drow"
          }
- :triggers []}
+ :trigger [[
+            #"You lose your footing and fall to your knees!"
+            (fn [_]
+              (>!! cmd-chan "st")
+              (t/put-string term-output "\n  STANDING\n"))]]}
