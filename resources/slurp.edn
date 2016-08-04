@@ -3,10 +3,21 @@
          "rd" "round drow"
          }
  :trigger [
-           [#"< ([0-9]+)h/[0-9]+H ([0-9]+)v/[0-9]+V Pos: [a-zA-Z]+ >"
-            (fn [[_ hp mv]]
-              (swap! status-info assoc :hp hp)
-              (swap! status-info assoc :mv mv))]
+
+           [#"Obvious exits:(.+)"
+            (fn [[_ exits]]
+              (swap! session-info assoc :exits
+                     (map (fn [[_ exit]]
+                            exit)
+                          (re-seq #"\-(\w+)" exits))))]
+           
+           [#"< ([0-9]+)h/([0-9]+)H ([0-9]+)v/([0-9]+)V Pos: ([a-zA-Z]+) >"
+            (fn [[_ hp max-hp mv max-mv pos]]
+              (swap! session-info assoc :hp hp)
+              (swap! session-info assoc :max-hp max-hp)
+              (swap! session-info assoc :mv mv)
+              (swap! session-info assoc :max-mv max-mv)
+              (swap! session-info assoc :pos pos))]
            
            [#"You lose your footing and fall to your knees!"
             (fn [_] (>!! cmd-chan "st"))]

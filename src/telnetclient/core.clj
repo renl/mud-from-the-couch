@@ -20,8 +20,12 @@
 (def screen-buffer (atom []))
 (def log (atom []))
 (def message-buffer (atom "No new messages"))
-(def status-info (atom {:hp "unknown"
-                        :mv "unknown"}))
+(def session-info (atom {:hp "unknown"
+                         :max-hp "unknown"
+                         :mv "unknown"
+                         :max-mv "unknown"
+                         :pos "unknown"
+                         :exits []}))
 (def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
 
 ;; Async channel
@@ -65,7 +69,7 @@
 ;; (def term-output (t/get-terminal
 ;;                   :unix))
 (def term-output (t/get-terminal
-                  :text
+                  :unix
                   {:palette :gnome}))
 
 
@@ -73,6 +77,7 @@
 
 ;; Functions
 ;; ================================================================================
+
 
 (defn check-alias []
   ((@client-mods :alias) @key-buffer))
@@ -82,18 +87,19 @@
   (swap! cmd-buffer update :pointer #(if (< % 0) 0 (dec %)))
   (reset! key-buffer (last (take (@cmd-buffer :pointer) (@cmd-buffer :history))))
   (t/clear term-input)
-  (t/put-string term-input @key-buffer))
+  (t/put-string term-input @key-buffer 0 0))
 
 
 (defn prev-cmd []
   (swap! cmd-buffer update :pointer inc)
   (reset! key-buffer (last (take (@cmd-buffer :pointer) (@cmd-buffer :history))))  
   (t/clear term-input)
-  (t/put-string term-input @key-buffer))
+  (t/put-string term-input @key-buffer 0 0))
 
 (defn handle-key-stroked [c]
   (swap! key-buffer str c)
-  (t/put-character term-input c))
+  (t/clear term-input)
+  (t/put-string term-input @key-buffer 0 0))
 
 (defn key-stroke-capturer []
   (t/in-terminal
@@ -104,7 +110,7 @@
          :escape nil
          :backspace (do (swap! key-buffer (comp (partial apply str) butlast))
                         (t/clear term-input)
-                        (t/put-string term-input @key-buffer))
+                        (t/put-string term-input @key-buffer 0 0))
          :left nil
          :right nil
          :up (prev-cmd)
@@ -117,11 +123,12 @@
          :page-down nil
          :tab nil
          :reverse-tab nil
-         :enter (do (t/clear term-input) (parse-cmd))
+         :enter (do (t/clear term-input)
+                    (parse-cmd))
          \space (if-let [alias-cmd (check-alias)]
                   (do (reset! key-buffer (str alias-cmd \space))
                       (t/clear term-input)
-                      (t/put-string term-input (str alias-cmd \space)))
+                      (t/put-string term-input (str alias-cmd \space) 0 0))
                   (handle-key-stroked \space))
          (handle-key-stroked c))))
    (println "Stopping key-stroke-capturer")))
@@ -157,48 +164,78 @@
 
 (defn render-messagebox [x y]
   (t/set-bg-color term-output :red)
-  (t/move-cursor term-output x y)
-  (doseq [_ (range 50)] (t/put-character term-output \space))
-  (t/move-cursor term-output x (+ y 4))
-  (doseq [_ (range 50)] (t/put-character term-output \space ))
+  (t/put-string term-output (apply str (repeat 50 \space)) x y)
+  (t/put-string term-output (apply str (repeat 50 \space)) x (+ y 4))  
   (t/set-bg-color term-output :white)
-  (t/set-fg-color term-output :black)
-  (t/move-cursor term-output x (+ y 1))
-  (doseq [_ (range 50)] (t/put-character term-output \space))
-  (t/move-cursor term-output x (+ y 2))
-  (doseq [_ (range 50)] (t/put-character term-output \space ))
-  (t/move-cursor term-output x (+ y 3))
-  (doseq [_ (range 50)] (t/put-character term-output \space ))
+  (t/set-fg-color term-output :black)  
+  (t/put-string term-output (apply str (repeat 50 \space)) x (+ y 1))
+  (t/put-string term-output (apply str (repeat 50 \space)) x (+ y 2))
+  (t/put-string term-output (apply str (repeat 50 \space)) x (+ y 3))
   (t/put-string term-output @message-buffer (+ x 2) (+ y 2))
   (t/set-bg-color term-output :default)
   (t/set-fg-color term-output :default))
 
 (defn render-statusbox [x y]
   (t/set-bg-color term-output :green)
-  (t/move-cursor term-output x y)
-  (doseq [_ (range 50)] (t/put-character term-output \space))
-  (t/move-cursor term-output x (+ y 11))
-  (doseq [_ (range 50)] (t/put-character term-output \space ))
+  (t/put-string term-output (apply str (repeat 50 \space)) x y)
+  (t/put-string term-output (apply str (repeat 50 \space)) x (+ y 11))  
   (t/set-bg-color term-output :white)
-  (t/set-fg-color term-output :black)
-  (t/move-cursor term-output x (+ y 1))
+  (t/set-fg-color term-output :black)  
   (doseq [xx (range 50)
           yy (range 10)]
-    (t/move-cursor term-output (+ x xx) (+ y yy 1))
-    (t/put-character term-output \space))
-  (t/put-string term-output (str "HP: " (@status-info :hp)) (+ x 2) (+ y 2))
-  (t/put-string term-output (str "MOVES: " (@status-info :mv)) (+ x 2) (+ y 4))  
+    (t/put-string term-output " " (+ x xx) (+ y yy 1)))
+  (let [{:keys [hp max-hp mv max-mv pos]} @session-info]
+    (t/put-string term-output (str "HP: " hp " / " max-hp) (+ x 2) (+ y 2))
+    (t/put-string term-output (str "MOVES: " mv " / " max-mv) (+ x 2) (+ y 4))
+    (t/put-string term-output (str "POS: " pos) (+ x 2) (+ y 6)))
   (t/set-bg-color term-output :default)
   (t/set-fg-color term-output :default))
+
+(defn render-border [x y w h]
+  (t/set-bg-color term-output :blue)
+  (t/put-string term-output (apply str (repeat (+ w 2) \-)) x y)
+  (t/put-string term-output (apply str (repeat (+ w 2) \-)) x (+ y h 1))
+  (doseq [i (range h)]
+    (t/put-string term-output "|" x (+ y i 1))
+    (t/put-string term-output "|" (+ x w 1) (+ y i 1)))
+  (t/set-bg-color term-output :default))
+
+(defn render-exitsbox [x y]
+  (t/set-bg-color term-output :red)  
+  (t/put-string term-output (apply str (repeat 35 \space)) x y)
+  (t/put-string term-output (apply str (repeat 35 \space)) x (+ y 10))  
+  (t/set-bg-color term-output :white)
+  (t/set-fg-color term-output :black)  
+  (doseq [i (range 1 10)]
+    (t/put-string term-output (apply str (repeat 35 \space)) x (+ y i)))
+  (t/put-string term-output "@" (+ x 12) (+ y 5))
+  (t/put-string term-output "-----" (+ x 28) (+ y 5))
+  (dorun (map #(case %
+                 "Northwest" (t/put-string term-output % (+ x 2) (+ y 2))
+                 "North" (t/put-string term-output % (+ x 10) (+ y 2))
+                 "Northeast" (t/put-string term-output % (+ x 18) (+ y 2))
+                 "West" (t/put-string term-output % (+ x 2) (+ y 5))
+                 "East" (t/put-string term-output % (+ x 18) (+ y 5))
+                 "Southwest" (t/put-string term-output % (+ x 2) (+ y 8))
+                 "South" (t/put-string term-output % (+ x 10) (+ y 8))
+                 "Southeast" (t/put-string term-output % (+ x 18) (+ y 8))
+                 "Up" (t/put-string term-output % (+ x 30) (+ y 3))
+                 "Down" (t/put-string term-output % (+ x 28) (+ y 7))
+                 ) (@session-info :exits)))
+  (t/set-bg-color term-output :default)
+  (t/set-fg-color term-output :default))
+
 
 (defn print-to-screen [buf]
   (t/clear term-output)
   (dorun (map-indexed
           (fn [line string]
-            (t/put-string term-output string 0 line))
-          buf))
-  (render-messagebox 90 5)
-  (render-statusbox 90 10))
+            (t/put-string term-output string 1 (inc line))) buf))
+  (render-border 0 0 100 40)
+  (render-messagebox 102 0)
+  (render-statusbox 102 5)
+  (render-exitsbox 102 17))
+
 
 (defn handle-screen-buffer [lines]
   (swap! screen-buffer #(vec (take-last 5000 (apply conj %1 %2))) lines))
@@ -211,8 +248,8 @@
            recv-str-split (clojure.string/split-lines recv-str)
            decolored-recv-str (clojure.string/replace recv-str #"\u001b\[[^m]+m" "")]
        (handle-screen-buffer recv-str-split)
-       (print-to-screen (take-last 40 @screen-buffer))
-       (>!! trigger-chan decolored-recv-str))))
+       (>!! trigger-chan decolored-recv-str)
+       (print-to-screen (take-last 40 @screen-buffer)))))
   (println "Stopping consume-recv-str"))
 
 
@@ -259,6 +296,7 @@
 (future (server-output-printer))
 (future (cmd-sender))
 (future (handle-triggers))
+
 
 (defn -main
   [& args]
