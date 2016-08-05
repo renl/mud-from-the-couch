@@ -1,5 +1,6 @@
 (ns telnetclient.core
   (:require [lanterna.terminal :as t]
+            [telnetclient.draw :refer [draw-rect draw-border]]
             [clojure.core.async :refer [<! >! <!! >!! chan go close!]])
   (:import [org.apache.commons.net.telnet
             TelnetClient
@@ -162,79 +163,62 @@
             (>!! screen-chan recv-str))))))
   (println "Stopping print-server-output"))
 
-(defn render-messagebox [x y]
-  (t/set-bg-color term-output :red)
-  (t/put-string term-output (apply str (repeat 50 \space)) x y)
-  (t/put-string term-output (apply str (repeat 50 \space)) x (+ y 4))  
-  (t/set-bg-color term-output :white)
-  (t/set-fg-color term-output :black)  
-  (t/put-string term-output (apply str (repeat 50 \space)) x (+ y 1))
-  (t/put-string term-output (apply str (repeat 50 \space)) x (+ y 2))
-  (t/put-string term-output (apply str (repeat 50 \space)) x (+ y 3))
-  (t/put-string term-output @message-buffer (+ x 2) (+ y 2))
-  (t/set-bg-color term-output :default)
-  (t/set-fg-color term-output :default))
+(defn render-messagebox [scr x y w h borderbg fillbg fillfg]
+  (draw-border scr x y w h \. :default borderbg)
+  (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default fillbg)
+  (t/set-bg-color scr fillbg)
+  (t/set-fg-color scr fillfg)
+  (t/put-string scr @message-buffer (+ x 2) (+ y 2))
+  (t/set-bg-color scr :default)
+  (t/set-fg-color scr :default))
 
-(defn render-statusbox [x y]
-  (t/set-bg-color term-output :green)
-  (t/put-string term-output (apply str (repeat 50 \space)) x y)
-  (t/put-string term-output (apply str (repeat 50 \space)) x (+ y 11))  
-  (t/set-bg-color term-output :white)
-  (t/set-fg-color term-output :black)  
-  (doseq [xx (range 50)
-          yy (range 10)]
-    (t/put-string term-output " " (+ x xx) (+ y yy 1)))
+(defn render-statusbox [scr x y w h borderbg fillbg fillfg]
+  (draw-border scr x y w h \. :default borderbg)
+  (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default fillbg)
+  (t/set-bg-color scr fillbg)
+  (t/set-fg-color scr fillfg)  
   (let [{:keys [hp max-hp mv max-mv pos]} @session-info]
-    (t/put-string term-output (str "HP: " hp " / " max-hp) (+ x 2) (+ y 2))
-    (t/put-string term-output (str "MOVES: " mv " / " max-mv) (+ x 2) (+ y 4))
-    (t/put-string term-output (str "POS: " pos) (+ x 2) (+ y 6)))
-  (t/set-bg-color term-output :default)
-  (t/set-fg-color term-output :default))
+    (t/put-string scr (str "HP: " hp " / " max-hp) (+ x 2) (+ y 2))
+    (t/put-string scr (str "MOVES: " mv " / " max-mv) (+ x 2) (+ y 4))
+    (t/put-string scr (str "POS: " pos) (+ x 2) (+ y 6)))
+  (t/set-bg-color scr :default)
+  (t/set-fg-color scr :default))
 
-(defn render-border [x y w h]
-  (t/set-bg-color term-output :blue)
-  (t/put-string term-output (apply str (repeat (+ w 2) \-)) x y)
-  (t/put-string term-output (apply str (repeat (+ w 2) \-)) x (+ y h 1))
-  (doseq [i (range h)]
-    (t/put-string term-output "|" x (+ y i 1))
-    (t/put-string term-output "|" (+ x w 1) (+ y i 1)))
-  (t/set-bg-color term-output :default))
+(defn render-rawdatabox [scr x y w h borderbg buf]
+  (draw-border scr x y w h \. :default borderbg)
+  (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default :default)
+  (dorun (map-indexed
+          (fn [line string]
+            (t/put-string term-output string 1 (inc line))) buf)))
 
-(defn render-exitsbox [x y]
-  (t/set-bg-color term-output :red)  
-  (t/put-string term-output (apply str (repeat 35 \space)) x y)
-  (t/put-string term-output (apply str (repeat 35 \space)) x (+ y 10))  
-  (t/set-bg-color term-output :white)
-  (t/set-fg-color term-output :black)  
-  (doseq [i (range 1 10)]
-    (t/put-string term-output (apply str (repeat 35 \space)) x (+ y i)))
-  (t/put-string term-output "@" (+ x 12) (+ y 5))
-  (t/put-string term-output "-----" (+ x 28) (+ y 5))
+(defn render-exitsbox [scr x y w h borderbg fillbg fillfg]
+  (draw-border scr x y w h \. :default borderbg)
+  (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default fillbg)
+  (t/set-bg-color scr fillbg)
+  (t/set-fg-color scr fillfg)  
+  (t/put-string scr "@" (+ x 11) (+ y 5))
+  (t/put-string scr "------" (+ x 23) (+ y 5))
   (dorun (map #(case %
-                 "Northwest" (t/put-string term-output % (+ x 2) (+ y 2))
-                 "North" (t/put-string term-output % (+ x 10) (+ y 2))
-                 "Northeast" (t/put-string term-output % (+ x 18) (+ y 2))
-                 "West" (t/put-string term-output % (+ x 2) (+ y 5))
-                 "East" (t/put-string term-output % (+ x 18) (+ y 5))
-                 "Southwest" (t/put-string term-output % (+ x 2) (+ y 8))
-                 "South" (t/put-string term-output % (+ x 10) (+ y 8))
-                 "Southeast" (t/put-string term-output % (+ x 18) (+ y 8))
-                 "Up" (t/put-string term-output % (+ x 30) (+ y 3))
-                 "Down" (t/put-string term-output % (+ x 28) (+ y 7))
-                 ) (@session-info :exits)))
-  (t/set-bg-color term-output :default)
-  (t/set-fg-color term-output :default))
+                 "Northwest" (t/put-string scr "NWest" (+ x 2) (+ y 2))
+                 "North" (t/put-string scr % (+ x 9) (+ y 2))
+                 "Northeast" (t/put-string scr "NEast" (+ x 16) (+ y 2))
+                 "West" (t/put-string scr % (+ x 2) (+ y 5))
+                 "East" (t/put-string scr % (+ x 16) (+ y 5))
+                 "Southwest" (t/put-string scr "SWest" (+ x 2) (+ y 8))
+                 "South" (t/put-string scr % (+ x 9) (+ y 8))
+                 "Southeast" (t/put-string scr "SEast" (+ x 16) (+ y 8))
+                 "Up" (t/put-string scr % (+ x 25) (+ y 3))
+                 "Down" (t/put-string scr % (+ x 24) (+ y 7)))
+              (@session-info :exits)))
+  (t/set-bg-color scr :default)
+  (t/set-fg-color scr :default))
 
 
 (defn print-to-screen [buf]
-  (t/clear term-output)
-  (dorun (map-indexed
-          (fn [line string]
-            (t/put-string term-output string 1 (inc line))) buf))
-  (render-border 0 0 100 40)
-  (render-messagebox 102 0)
-  (render-statusbox 102 5)
-  (render-exitsbox 102 17))
+  (render-rawdatabox term-output 0 0 100 42 :blue buf)
+  (render-messagebox term-output 100 0 50 5 :red :white :black)
+  (render-statusbox term-output 100 5 50 9 :green :white :black)
+  (render-exitsbox term-output 100 14 31 11 :cyan :white :black))
 
 
 (defn handle-screen-buffer [lines]
