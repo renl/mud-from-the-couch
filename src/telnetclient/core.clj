@@ -1,5 +1,6 @@
 (ns telnetclient.core
   (:require [lanterna.terminal :as t]
+            [telnetclient.ansicode :refer [split-tag-ansi-codes translate]]
             [telnetclient.draw :refer [draw-rect draw-border]]
             [clojure.core.async :refer [<! >! <!! >!! chan go close!]])
   (:import [org.apache.commons.net.telnet
@@ -67,11 +68,13 @@
                   :rows 1
                   :palette :gnome}))
 
-;; (def term-output (t/get-terminal
-;;                   :unix))
 (def term-output (t/get-terminal
-                  :unix
-                  {:palette :gnome}))
+                  ;; :unix
+                  :swing
+                  {
+                   :cols 160
+                   :rows 50
+                   :palette :mac-os-x}))
 
 
 
@@ -184,12 +187,42 @@
   (t/set-bg-color scr :default)
   (t/set-fg-color scr :default))
 
+(defn put-coded-text [text line]
+  (t/move-cursor term-output 1 line)
+  (let [print-seq (split-tag-ansi-codes (str " " text " "))]
+    (doseq [grp print-seq]
+      (case (grp :type)
+        :code (doseq [action (translate (grp :val))]
+                (case (action :set)
+                  :default (do (t/set-fg-color term-output :default)
+                               (t/set-bg-color term-output :default))
+                  :style nil
+                  :fg-bg-color (do (t/set-fg-color term-output (action :val1))
+                                   (t/set-bg-color term-output (action :val2)))
+                  :fg-color (t/set-fg-color term-output (action :val))
+                  :bg-color (t/set-bg-color term-output (action :val))))
+        :text (t/put-string term-output (grp :val))))))
+
+
+;; (defn extract-code-from-text [buf]
+;;   (map #(split-tag-ansi-codes (str " " % " ")) buf))
+
+
+;; (defn trunc-text-80 [line]
+;;   (reduce (fn [] ) [] line))
+
+;; (defn pack-buffer-80-wide [buf]
+;;   (map trunc-text-80 buf))
+
 (defn render-rawdatabox [scr x y w h borderbg buf]
   (draw-border scr x y w h \. :default borderbg)
   (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default :default)
+  ;; (pack-buffer-80-wide (extract-code-from-text buf))
   (dorun (map-indexed
-          (fn [line string]
-            (t/put-string term-output string 1 (inc line))) buf)))
+          (fn [line text]
+            ;; (t/put-string term-output text 1 (inc line))
+            (put-coded-text text (inc line))
+            ) buf)))
 
 (defn render-exitsbox [scr x y w h borderbg fillbg fillfg]
   (draw-border scr x y w h \. :default borderbg)
