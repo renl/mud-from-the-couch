@@ -95,8 +95,8 @@
 
 
 (defn prev-cmd []
-  (swap! cmd-buffer update :pointer inc)
-  (reset! key-buffer (last (take (@cmd-buffer :pointer) (@cmd-buffer :history))))  
+  (swap! cmd-buffer update :pointer inc)  
+  (reset! key-buffer (last (take (@cmd-buffer :pointer) (@cmd-buffer :history))))
   (t/clear term-input)
   (t/put-string term-input @key-buffer 0 0))
 
@@ -135,7 +135,7 @@
                       (t/put-string term-input (str alias-cmd \space) 0 0))
                   (handle-key-stroked \space))
          (handle-key-stroked c))))
-   (println "Stopping key-stroke-capturer")))
+   (prn "Stopping key-stroke-capturer")))
 
 
 
@@ -149,6 +149,7 @@
                   (reset! running false)
                   (close! screen-chan)
                   (shutdown-agents))
+        "#clear" (t/clear term-output)
         "#load" (reset! client-mods (eval (read-string (slurp "resources/slurp.edn"))))
         (>!! cmd-chan cmd-txt)))))
 
@@ -164,7 +165,7 @@
             (recur (str recv-str (String. in-buf 0 i))))
           (if (not-empty recv-str)
             (>!! screen-chan recv-str))))))
-  (println "Stopping print-server-output"))
+  (prn "Stopping print-server-output"))
 
 (defn render-messagebox [scr x y w h borderbg fillbg fillfg]
   (draw-border scr x y w h \. :default borderbg)
@@ -187,32 +188,69 @@
   (t/set-bg-color scr :default)
   (t/set-fg-color scr :default))
 
-(defn put-coded-text [text line]
+(defn put-coded-text [tags line]
   (t/move-cursor term-output 1 line)
-  (let [print-seq (split-tag-ansi-codes (str " " text " "))]
-    (doseq [grp print-seq]
-      (case (grp :type)
-        :code (doseq [action (translate (grp :val))]
-                (case (action :set)
-                  :default (do (t/set-fg-color term-output :default)
-                               (t/set-bg-color term-output :default))
-                  :style nil
-                  :fg-bg-color (do (t/set-fg-color term-output (action :val1))
-                                   (t/set-bg-color term-output (action :val2)))
-                  :fg-color (t/set-fg-color term-output (action :val))
-                  :bg-color (t/set-bg-color term-output (action :val))))
-        :text (t/put-string term-output (grp :val))))))
+  (doseq [tag tags]
+    (case (tag :type)
+      :code (doseq [action (translate (tag :val))]
+              (case (action :set)
+                :default (do (t/set-fg-color term-output :default)
+                             (t/set-bg-color term-output :default))
+                :style nil
+                :fg-bg-color (do (t/set-fg-color term-output (action :val1))
+                                 (t/set-bg-color term-output (action :val2)))
+                :fg-color (t/set-fg-color term-output (action :val))
+                :bg-color (t/set-bg-color term-output (action :val))))
+      :text (t/put-string term-output (tag :val)))))
 
 
-;; (defn extract-code-from-text [buf]
-;;   (map #(split-tag-ansi-codes (str " " % " ")) buf))
+(defn split-and-tag [buf]
+  (split-tag-ansi-codes (str " " buf " ")))
 
 
-;; (defn trunc-text-80 [line]
-;;   (reduce (fn [] ) [] line))
+(defn trunc-text-96 [buf]
+  (loop [tags buf
+         space-left 96
+         curr-line []
+         packed-lines []]
+    (let [tag (first tags)]
+      (if tag
+        (case (tag :type)
+          :code (recur (rest tags)
+                       space-left
+                       (conj curr-line tag)
+                       packed-lines)
+          :text (let [char-count (count (tag :val))
+                      spill-over-count (- char-count space-left)
+                      next-tags (rest tags)]
+                  (if (> spill-over-count 0)
+                    (recur (conj next-tags
+                                 (update tag
+                                         :val
+                                         #((comp (partial apply str " ") drop) %2 %1)
+                                         space-left))
+                           96
+                           []
+                           (conj packed-lines
+                                 (conj curr-line
+                                       (update tag
+                                               :val
+                                               #((comp (partial apply str) take) %2 %1)
+                                               space-left))))
+                    (recur next-tags
+                           (- space-left char-count)
+                           (conj curr-line tag)
+                           packed-lines))))
+        (conj packed-lines curr-line)))))
 
-;; (defn pack-buffer-80-wide [buf]
-;;   (map trunc-text-80 buf))
+
+(defn prep-buf [buf]
+  (->> buf
+       (map split-and-tag)
+       (map trunc-text-96) 
+       (apply concat) 
+       (vec)
+       (take-last 40)))
 
 (defn render-rawdatabox [scr x y w h borderbg buf]
   (draw-border scr x y w h \. :default borderbg)
@@ -222,7 +260,8 @@
           (fn [line text]
             ;; (t/put-string term-output text 1 (inc line))
             (put-coded-text text (inc line))
-            ) buf)))
+            )
+          (prep-buf buf))))
 
 (defn render-exitsbox [scr x y w h borderbg fillbg fillfg]
   (draw-border scr x y w h \. :default borderbg)
@@ -267,7 +306,7 @@
        (handle-screen-buffer recv-str-split)
        (>!! trigger-chan decolored-recv-str)
        (print-to-screen (take-last 40 @screen-buffer)))))
-  (println "Stopping consume-recv-str"))
+  (prn "Stopping consume-recv-str"))
 
 
 (defn re-to-act [buf]
@@ -281,14 +320,14 @@
           buf (<!! trigger-chan)]
       (dorun
        (map (re-to-act buf) triggers))))
-  (println "Stopping trigger handlers"))
+  (prn "Stopping trigger handlers"))
 
 
 (defn handle-cmd-history [cmd]
   (swap! cmd-buffer (fn [m]
                       (-> m
                           (update :history conj cmd)
-                          (assoc :pointer 1))))
+                          (assoc :pointer 0))))
   (reset! key-buffer ""))
 
 
@@ -301,7 +340,7 @@
       (.write ops out-buf 0 i)
       (.flush ops)
       (handle-cmd-history cmd)))
-  (println "Stopping cmd-sender"))
+  (prn "Stopping cmd-sender"))
 
 
 
@@ -317,4 +356,4 @@
 
 (defn -main
   [& args]
-  (println "Mud starting.............."))
+  (prn "Mud starting.............."))
