@@ -1,6 +1,8 @@
 <<<<<<< HEAD
 # telnetclient
 
+![mud client screenshot](https://lh4.googleusercontent.com/-ayIw0xKXZJ0/V6XqWZFyt2I/AAAAAAAANew/woxPJFsYCS8vP-szFe547aJ4BX-bjPqLACL0B/w986-h661-no/mud-client.PNG)
+
 FIXME: description
 
 ## Installation
