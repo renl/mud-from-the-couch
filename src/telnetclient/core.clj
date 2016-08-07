@@ -13,13 +13,15 @@
 (declare parse-cmd cmd-chan term-output)
 
 ;; App states
-;; ================================================================================
+;; =============================================================================
 (def running (atom true))
 (def key-buffer (atom ""))
 (def cmd-buffer (atom {:history '()
                        :pointer 1}))
 (def in-buf (byte-array 1024))
 (def screen-buffer (atom []))
+(def tab-complete-list (atom #{}))
+(def key-stroke-buffer (atom '()))
 (def log (atom []))
 (def message-buffer (atom "No new messages"))
 (def session-info (atom {:hp "unknown"
@@ -31,7 +33,7 @@
 (def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
 
 ;; Async channel
-;; ================================================================================
+;; =============================================================================
 (def screen-chan (chan))
 (def key-stroke-chan (chan))
 (def cmd-chan (chan))
@@ -39,10 +41,11 @@
 
 
 ;; Client config
-;; ================================================================================
+;; =============================================================================
 (def tc
   (doto (TelnetClient.)
-    (.addOptionHandler (TerminalTypeOptionHandler. "VT100" false false true false))
+    (.addOptionHandler (TerminalTypeOptionHandler. "VT100"
+                                                   false false true false))
     (.addOptionHandler (EchoOptionHandler. true false true false))
     (.addOptionHandler (SuppressGAOptionHandler. true true true true))
     ))
@@ -53,7 +56,7 @@
 
 
 ;; Streams
-;; ================================================================================
+;; =============================================================================
 (def ips (.getInputStream tc))
 (def ops (.getOutputStream tc))
 
@@ -61,7 +64,7 @@
 
 
 ;; Terminals
-;; ================================================================================
+;; =============================================================================
 (def term-input (t/get-terminal
                  :swing
                  {:cols 80
@@ -80,7 +83,7 @@
 
 
 ;; Functions
-;; ================================================================================
+;; =============================================================================
 
 
 (defn check-alias []
@@ -89,30 +92,70 @@
 
 (defn next-cmd []
   (swap! cmd-buffer update :pointer #(if (< % 0) 0 (dec %)))
-  (reset! key-buffer (last (take (@cmd-buffer :pointer) (@cmd-buffer :history))))
+  (reset! key-buffer (last (take (@cmd-buffer :pointer)
+                                 (@cmd-buffer :history))))
   (t/clear term-input)
   (t/put-string term-input @key-buffer 0 0))
 
 
 (defn prev-cmd []
   (swap! cmd-buffer update :pointer inc)  
-  (reset! key-buffer (last (take (@cmd-buffer :pointer) (@cmd-buffer :history))))
+  (reset! key-buffer (last (take (@cmd-buffer :pointer)
+                                 (@cmd-buffer :history))))
+  (t/clear term-input)
+  (t/put-string term-input @key-buffer 0 0))
+
+
+
+(defn print-key-buffer []
   (t/clear term-input)
   (t/put-string term-input @key-buffer 0 0))
 
 (defn handle-key-stroked [c]
   (swap! key-buffer str c)
-  (t/clear term-input)
-  (t/put-string term-input @key-buffer 0 0))
+  (print-key-buffer))
+
+
+(defn key-buffer-replace-last-word [w]
+  (as-> @key-buffer kb
+       (clojure.string/split kb #" ")
+       (pop kb)
+       (conj kb w)
+       (clojure.string/join " " kb)
+       (reset! key-buffer kb)))
+
+(defn remove-ansi-code [text]
+  (clojure.string/replace text #"\u001b\[[^m]+m" ""))
+
+(defn tab-complete []
+  (let [prev-key (second @key-stroke-buffer)
+        search-regex (re-pattern (str "\\b"
+                                      (last (clojure.string/split
+                                             @key-buffer #" "))
+                                      "\\w+"))]
+    (if (= prev-key :tab)
+      (swap! tab-complete-list (comp set rest))
+      (->> (take-last 100 @screen-buffer)
+           ;; (reverse)
+           (concat)
+           (apply str)
+           (remove-ansi-code)
+           (re-seq search-regex)
+           (set)
+           (reset! tab-complete-list)))
+    (key-buffer-replace-last-word (first @tab-complete-list))
+    (print-key-buffer)))
 
 (defn key-stroke-capturer []
   (t/in-terminal
    term-input
    (while @running
      (let [c (t/get-key-blocking term-input)]
+       (swap! key-stroke-buffer conj c)
        (case c
          :escape nil
-         :backspace (do (swap! key-buffer (comp (partial apply str) butlast))
+         :backspace (do (swap! key-buffer
+                               (comp (partial apply str) butlast))
                         (t/clear term-input)
                         (t/put-string term-input @key-buffer 0 0))
          :left nil
@@ -125,14 +168,15 @@
          :end nil
          :page-up nil
          :page-down nil
-         :tab nil
+         :tab (tab-complete)
          :reverse-tab nil
          :enter (do (t/clear term-input)
                     (parse-cmd))
          \space (if-let [alias-cmd (check-alias)]
                   (do (reset! key-buffer (str alias-cmd \space))
                       (t/clear term-input)
-                      (t/put-string term-input (str alias-cmd \space) 0 0))
+                      (t/put-string term-input
+                                    (str alias-cmd \space) 0 0))
                   (handle-key-stroked \space))
          (handle-key-stroked c))))
    (prn "Stopping key-stroke-capturer")))
@@ -150,7 +194,9 @@
                   (close! screen-chan)
                   (shutdown-agents))
         "#clear" (t/clear term-output)
-        "#load" (reset! client-mods (eval (read-string (slurp "resources/slurp.edn"))))
+        "#load" (reset! client-mods (eval
+                                     (read-string
+                                      (slurp "resources/slurp.edn"))))
         (>!! cmd-chan cmd-txt)))))
 
 
@@ -227,7 +273,8 @@
                     (recur (conj next-tags
                                  (update tag
                                          :val
-                                         #((comp (partial apply str " ") drop) %2 %1)
+                                         #((comp (partial apply str " ")
+                                                 drop) %2 %1)
                                          space-left))
                            96
                            []
@@ -235,7 +282,8 @@
                                  (conj curr-line
                                        (update tag
                                                :val
-                                               #((comp (partial apply str) take) %2 %1)
+                                               #((comp (partial apply str)
+                                                       take) %2 %1)
                                                space-left))))
                     (recur next-tags
                            (- space-left char-count)
@@ -294,7 +342,14 @@
 
 
 (defn handle-screen-buffer [lines]
-  (swap! screen-buffer #(vec (take-last 5000 (apply conj %1 %2))) lines))
+  (swap! screen-buffer
+         #(->> %2
+               (apply conj %1)
+               (take-last 5000)
+               (vec))
+         lines))
+
+
 
 (defn server-output-printer []
   (t/in-terminal
@@ -302,7 +357,7 @@
    (while @running
      (let [recv-str (<!! screen-chan)
            recv-str-split (clojure.string/split-lines recv-str)
-           decolored-recv-str (clojure.string/replace recv-str #"\u001b\[[^m]+m" "")]
+           decolored-recv-str (remove-ansi-code recv-str)]
        (handle-screen-buffer recv-str-split)
        (>!! trigger-chan decolored-recv-str)
        (print-to-screen (take-last 40 @screen-buffer)))))
@@ -346,7 +401,7 @@
 
 
 ;; Start threads
-;; ================================================================================
+;; =============================================================================
 (future (key-stroke-capturer))
 (future (server-output-receiver))
 (future (server-output-printer))

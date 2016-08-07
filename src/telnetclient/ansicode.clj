@@ -20,7 +20,8 @@
             5 {:set :style :val :blinking}
             7 {:set :style :val :reverse}
             8 {:set :default :val :default}
-            30 {:set :fg-bg-color :val1 :black :val2 :white}
+            30 {:set :fg-color :val :green}
+            ;; 30 {:set :fg-bg-color :val1 :black :val2 :white}            
             31 {:set :fg-color :val :red}
             32 {:set :fg-color :val :green}
             33 {:set :fg-color :val :yellow}
