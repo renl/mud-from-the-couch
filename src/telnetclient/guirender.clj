@@ -117,15 +117,36 @@
                  "Southeast" (t/put-string scr "SEast" (+ x 16) (+ y 8))
                  "Up" (t/put-string scr % (+ x 25) (+ y 3))
                  "Down" (t/put-string scr % (+ x 24) (+ y 7)))
-              (info :exits)))
+              (:exits info)))
   (t/set-bg-color scr :default)
   (t/set-fg-color scr :default))
 
-(defn render-objectsbox [scr x y w h borderbg fillbg fillfg objects]
+
+(defn render-selected-objectbox [scr x y w h borderbg fillbg fillfg object word-index]
+  (draw-border scr x y w h \. :default borderbg)
   (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default fillbg)
   (t/set-bg-color scr fillbg)
   (t/set-fg-color scr fillfg)
-  (let [obj-to-print (map #(subs % 0 (min 50 (count %))) (take-last 20 objects))]
+  (t/move-cursor scr (+ x 2) (+ y 2))
+  (dorun (map-indexed
+          (fn [ind word] (if (= ind word-index)
+                           (do
+                             (t/put-string scr "[[")
+                             (t/set-bg-color scr :green)
+                             (t/put-string scr word)
+                             (t/set-bg-color scr fillbg)
+                             (t/put-string scr "]] "))
+                           (t/put-string scr (str word " "))))
+          object))
+  (t/set-bg-color scr :default)
+  (t/set-fg-color scr :default))
+
+
+(defn render-objectsbox [scr x y w h borderbg fillbg fillfg objects sel-ind]
+  (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default fillbg)
+  (t/set-bg-color scr fillbg)
+  (t/set-fg-color scr fillfg)
+  (let [obj-to-print (map #(subs % 0 (min 50 (count %))) objects)]
     (dorun (map-indexed
             (fn [ind obj]
               (let [col-num (quot ind (- h 2))
@@ -133,7 +154,12 @@
                     yy (+ y 1 (case col-num
                                 0 ind
                                 1 (rem ind (- h 2))))]
-                (t/put-string scr obj xx yy)))
+                (if (= ind sel-ind)
+                  (do
+                    (t/set-bg-color scr :green)
+                    (t/put-string scr obj xx yy)
+                    (t/set-bg-color scr fillbg))
+                  (t/put-string scr obj xx yy))))
             obj-to-print)))
   (t/set-bg-color scr :default)
   (t/set-fg-color scr :default)

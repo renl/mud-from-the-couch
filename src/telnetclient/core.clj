@@ -4,7 +4,8 @@
                                             render-statusbox
                                             render-rawdatabox
                                             render-exitsbox
-                                            render-objectsbox]]
+                                            render-objectsbox
+                                            render-selected-objectbox]]
             [clojure.core.async :refer [<! >! <!! >!! chan go close!]])
   (:import [org.apache.commons.net.telnet
             TelnetClient
@@ -15,8 +16,19 @@
 
 (declare parse-cmd cmd-chan term-output)
 
+
+;; Async channel
+;; =============================================================================
+(def screen-chan (chan))
+(def key-stroke-chan (chan))
+(def cmd-chan (chan))
+(def trigger-chan (chan))
+(def render-chan (chan))
+
+
 ;; App states
 ;; =============================================================================
+(def interface-mode (atom :input-key))
 (def running (atom true))
 (def key-buffer (atom ""))
 (def cmd-buffer (atom {:history '()
@@ -32,15 +44,13 @@
                          :mv "unknown"
                          :max-mv "unknown"
                          :pos "unknown"
-                         :exits []}))
+                         :exits []
+                         :objects []
+                         :select-index 0
+                         :curr-object []
+                         :word-index 0}))
 (def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
 
-;; Async channel
-;; =============================================================================
-(def screen-chan (chan))
-(def key-stroke-chan (chan))
-(def cmd-chan (chan))
-(def trigger-chan (chan))
 
 
 ;; Client config
@@ -149,6 +159,52 @@
     (key-buffer-replace-last-word (first @tab-complete-list))
     (print-key-buffer)))
 
+(defn prev-word []
+  (swap! session-info update :word-index dec)
+  (>!! render-chan
+       '(render-selected-objectbox term-output
+                           5 5 145 5
+                           :magenta :white :black
+                           (@session-info :curr-object)
+                           (@session-info :word-index))))
+
+(defn next-word []
+  (swap! session-info update :word-index inc)
+  (>!! render-chan
+       '(render-selected-objectbox term-output
+                           5 5 145 5
+                           :magenta :white :black
+                           (@session-info :curr-object)
+                           (@session-info :word-index))))
+
+(defn prev-obj []
+  (swap! session-info update :select-index #(if (> % 0) (dec %) %))
+  (swap! session-info assoc
+         :curr-object
+         (clojure.string/split
+          (get-in @session-info
+                  [:objects (@session-info :select-index)]) #" "))
+  (>!! render-chan
+       '(render-objectsbox term-output
+                           0 37 102 12
+                           :magenta :white :black
+                           (@session-info :objects)
+                           (@session-info :select-index))))
+
+(defn next-obj []
+  (swap! session-info update :select-index #(if (< % 19) (inc %) %))
+  (swap! session-info assoc
+         :curr-object
+         (clojure.string/split
+          (get-in @session-info
+                  [:objects (@session-info :select-index)]) #" ")) 
+  (>!! render-chan
+       '(render-objectsbox term-output
+                           0 37 102 12
+                           :magenta :white :black
+                           (@session-info :objects)
+                           (@session-info :select-index))))
+
 (defn key-stroke-capturer []
   (t/in-terminal
    term-input
@@ -156,15 +212,23 @@
      (let [c (t/get-key-blocking term-input)]
        (swap! key-stroke-buffer conj c)
        (case c
-         :escape nil
+         :escape (reset! interface-mode :input-key)
          :backspace (do (swap! key-buffer
                                (comp (partial apply str) butlast))
                         (t/clear term-input)
                         (t/put-string term-input @key-buffer 0 0))
-         :left nil
-         :right nil
-         :up (prev-cmd)
-         :down (next-cmd)
+         :left (case @interface-mode
+                 :input-key nil
+                 :selection (prev-word))
+         :right (case @interface-mode
+                  :input-key nil
+                  :selection (next-word))
+         :up (case @interface-mode
+               :input-key (prev-cmd)
+               :selection (prev-obj))
+         :down (case @interface-mode
+                 :input-key (next-cmd)
+                 :selection (next-obj))
          :insert nil
          :delete nil
          :home nil
@@ -197,6 +261,7 @@
                   (close! screen-chan)
                   (shutdown-agents))
         "#clear" (t/clear term-output)
+        "#select" (reset! interface-mode :selection)
         "#load" (reset! client-mods (eval
                                      (read-string
                                       (slurp "resources/slurp.edn"))))
@@ -217,12 +282,20 @@
   (prn "Stopping print-server-output"))
 
 
+(defn render-runner []
+  (render-rawdatabox term-output 0 0 102 37 :blue nil)
+  (render-messagebox term-output 102 0 50 5 :red :white :black nil)
+  (render-statusbox term-output 102 5 50 9 :green :white :black nil)
+  (render-exitsbox term-output 102 14 31 11 :cyan :white :black nil)
+  (render-objectsbox term-output 0 37 102 12 :magenta :white :black nil 0)
+  (while @running
+    (let [render-function (<!! render-chan)]
+      (eval render-function)))
+  (prn "Stopping render-runner"))
+
+
 (defn print-to-screen [buf]
-  (render-rawdatabox term-output 0 0 102 37 :blue buf)
-  (render-messagebox term-output 102 0 50 5 :red :white :black @message-buffer)
-  (render-statusbox term-output 102 5 50 9 :green :white :black @session-info)
-  (render-exitsbox term-output 102 14 31 11 :cyan :white :black @session-info)
-  (render-objectsbox term-output 0 37 102 12 :magenta :white :black (@session-info :objects)))
+  (>!! render-chan `(render-rawdatabox term-output 0 0 102 37 :blue (quote ~buf))))
 
 
 (defn handle-screen-buffer [lines]
@@ -291,7 +364,7 @@
 (future (server-output-printer))
 (future (cmd-sender))
 (future (handle-triggers))
-
+(future (render-runner))
 
 (defn -main
   [& args]

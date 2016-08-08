@@ -4,20 +4,34 @@
          }
  :trigger [
 
-           [#"Obvious exits:.+\n(?:.+\n)+< .+ >"
+           [#"Obvious exits:.+\n(?:.+\n)*?< .+ >"
             (fn [objects]
               (->> objects
-                  (clojure.string/split-lines)
-                  (rest)
-                  (butlast)
-                  (swap! session-info assoc :objects)))]
+                   (clojure.string/split-lines)
+                   (rest)
+                   (butlast)
+                   (take-last 20)
+                   (vec)
+                   (swap! session-info assoc :objects))
+              (swap! session-info assoc :select-index 0)
+              (>!! render-chan
+                   '(render-objectsbox term-output
+                                       0 37 102 12
+                                       :magenta :white :black
+                                       (@session-info :objects)
+                                       (@session-info :select-index))))]
 
            [#"Obvious exits:(.+)"
             (fn [[_ exits]]
               (swap! session-info assoc :exits
                      (map (fn [[_ exit]]
                             exit)
-                          (re-seq #"\-(\w+)" exits))))]
+                          (re-seq #"\-(\w+)" exits)))
+              (>!! render-chan
+                   '(render-exitsbox term-output
+                                     102 14 31 11
+                                     :cyan :white :black
+                                     @session-info)))]
            
            [#"< ([0-9]+)h/([0-9]+)H ([0-9]+)v/([0-9]+)V Pos: ([a-zA-Z]+) >"
             (fn [[_ hp max-hp mv max-mv pos]]
@@ -25,7 +39,12 @@
               (swap! session-info assoc :max-hp max-hp)
               (swap! session-info assoc :mv mv)
               (swap! session-info assoc :max-mv max-mv)
-              (swap! session-info assoc :pos pos))]
+              (swap! session-info assoc :pos pos)
+              (>!! render-chan
+                   '(render-statusbox term-output
+                                      102 5 50 9
+                                      :green :white :black
+                                      @session-info)))]
            
            [#"You lose your footing and fall to your knees!"
             (fn [_] (>!! cmd-chan "st"))]
