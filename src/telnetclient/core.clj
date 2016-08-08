@@ -1,7 +1,10 @@
 (ns telnetclient.core
   (:require [lanterna.terminal :as t]
-            [telnetclient.ansicode :refer [split-tag-ansi-codes translate]]
-            [telnetclient.draw :refer [draw-rect draw-border]]
+            [telnetclient.guirender :refer [render-messagebox
+                                            render-statusbox
+                                            render-rawdatabox
+                                            render-exitsbox
+                                            render-objectsbox]]
             [clojure.core.async :refer [<! >! <!! >!! chan go close!]])
   (:import [org.apache.commons.net.telnet
             TelnetClient
@@ -135,7 +138,7 @@
                                       "\\w+"))]
     (if (= prev-key :tab)
       (swap! tab-complete-list (comp set rest))
-      (->> (take-last 100 @screen-buffer)
+      (->> (take-last 5000 @screen-buffer)
            ;; (reverse)
            (concat)
            (apply str)
@@ -213,132 +216,13 @@
             (>!! screen-chan recv-str))))))
   (prn "Stopping print-server-output"))
 
-(defn render-messagebox [scr x y w h borderbg fillbg fillfg]
-  (draw-border scr x y w h \. :default borderbg)
-  (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default fillbg)
-  (t/set-bg-color scr fillbg)
-  (t/set-fg-color scr fillfg)
-  (t/put-string scr @message-buffer (+ x 2) (+ y 2))
-  (t/set-bg-color scr :default)
-  (t/set-fg-color scr :default))
-
-(defn render-statusbox [scr x y w h borderbg fillbg fillfg]
-  (draw-border scr x y w h \. :default borderbg)
-  (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default fillbg)
-  (t/set-bg-color scr fillbg)
-  (t/set-fg-color scr fillfg)  
-  (let [{:keys [hp max-hp mv max-mv pos]} @session-info]
-    (t/put-string scr (str "HP: " hp " / " max-hp) (+ x 2) (+ y 2))
-    (t/put-string scr (str "MOVES: " mv " / " max-mv) (+ x 2) (+ y 4))
-    (t/put-string scr (str "POS: " pos) (+ x 2) (+ y 6)))
-  (t/set-bg-color scr :default)
-  (t/set-fg-color scr :default))
-
-(defn put-coded-text [tags line]
-  (t/move-cursor term-output 1 line)
-  (doseq [tag tags]
-    (case (tag :type)
-      :code (doseq [action (translate (tag :val))]
-              (case (action :set)
-                :default (do (t/set-fg-color term-output :default)
-                             (t/set-bg-color term-output :default))
-                :style nil
-                :fg-bg-color (do (t/set-fg-color term-output (action :val1))
-                                 (t/set-bg-color term-output (action :val2)))
-                :fg-color (t/set-fg-color term-output (action :val))
-                :bg-color (t/set-bg-color term-output (action :val))))
-      :text (t/put-string term-output (tag :val)))))
-
-
-(defn split-and-tag [buf]
-  (split-tag-ansi-codes (str " " buf " ")))
-
-
-(defn trunc-text-96 [buf]
-  (loop [tags buf
-         space-left 96
-         curr-line []
-         packed-lines []]
-    (let [tag (first tags)]
-      (if tag
-        (case (tag :type)
-          :code (recur (rest tags)
-                       space-left
-                       (conj curr-line tag)
-                       packed-lines)
-          :text (let [char-count (count (tag :val))
-                      spill-over-count (- char-count space-left)
-                      next-tags (rest tags)]
-                  (if (> spill-over-count 0)
-                    (recur (conj next-tags
-                                 (update tag
-                                         :val
-                                         #((comp (partial apply str " ")
-                                                 drop) %2 %1)
-                                         space-left))
-                           96
-                           []
-                           (conj packed-lines
-                                 (conj curr-line
-                                       (update tag
-                                               :val
-                                               #((comp (partial apply str)
-                                                       take) %2 %1)
-                                               space-left))))
-                    (recur next-tags
-                           (- space-left char-count)
-                           (conj curr-line tag)
-                           packed-lines))))
-        (conj packed-lines curr-line)))))
-
-
-(defn prep-buf [buf]
-  (->> buf
-       (map split-and-tag)
-       (map trunc-text-96) 
-       (apply concat) 
-       (vec)
-       (take-last 40)))
-
-(defn render-rawdatabox [scr x y w h borderbg buf]
-  (draw-border scr x y w h \. :default borderbg)
-  (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default :default)
-  ;; (pack-buffer-80-wide (extract-code-from-text buf))
-  (dorun (map-indexed
-          (fn [line text]
-            ;; (t/put-string term-output text 1 (inc line))
-            (put-coded-text text (inc line))
-            )
-          (prep-buf buf))))
-
-(defn render-exitsbox [scr x y w h borderbg fillbg fillfg]
-  (draw-border scr x y w h \. :default borderbg)
-  (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default fillbg)
-  (t/set-bg-color scr fillbg)
-  (t/set-fg-color scr fillfg)  
-  (t/put-string scr "@" (+ x 11) (+ y 5))
-  (t/put-string scr "------" (+ x 23) (+ y 5))
-  (dorun (map #(case %
-                 "Northwest" (t/put-string scr "NWest" (+ x 2) (+ y 2))
-                 "North" (t/put-string scr % (+ x 9) (+ y 2))
-                 "Northeast" (t/put-string scr "NEast" (+ x 16) (+ y 2))
-                 "West" (t/put-string scr % (+ x 2) (+ y 5))
-                 "East" (t/put-string scr % (+ x 16) (+ y 5))
-                 "Southwest" (t/put-string scr "SWest" (+ x 2) (+ y 8))
-                 "South" (t/put-string scr % (+ x 9) (+ y 8))
-                 "Southeast" (t/put-string scr "SEast" (+ x 16) (+ y 8))
-                 "Up" (t/put-string scr % (+ x 25) (+ y 3))
-                 "Down" (t/put-string scr % (+ x 24) (+ y 7)))
-              (@session-info :exits)))
-  (t/set-bg-color scr :default)
-  (t/set-fg-color scr :default))
-
 
 (defn print-to-screen [buf]
-  (render-rawdatabox term-output 0 0 100 42 :blue buf)
-  (render-messagebox term-output 100 0 50 5 :red :white :black)
-  (render-statusbox term-output 100 5 50 9 :green :white :black)
-  (render-exitsbox term-output 100 14 31 11 :cyan :white :black))
+  (render-rawdatabox term-output 0 0 102 37 :blue buf)
+  (render-messagebox term-output 102 0 50 5 :red :white :black @message-buffer)
+  (render-statusbox term-output 102 5 50 9 :green :white :black @session-info)
+  (render-exitsbox term-output 102 14 31 11 :cyan :white :black @session-info)
+  (render-objectsbox term-output 0 37 102 12 :magenta :white :black (@session-info :objects)))
 
 
 (defn handle-screen-buffer [lines]

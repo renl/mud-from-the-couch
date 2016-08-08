@@ -4,6 +4,14 @@
          }
  :trigger [
 
+           [#"Obvious exits:.+\n(?:.+\n)+< .+ >"
+            (fn [objects]
+              (->> objects
+                  (clojure.string/split-lines)
+                  (rest)
+                  (butlast)
+                  (swap! session-info assoc :objects)))]
+
            [#"Obvious exits:(.+)"
             (fn [[_ exits]]
               (swap! session-info assoc :exits
@@ -32,5 +40,4 @@
             (fn [_] (let [cnt (@client-mods :stat-counter)]
                       (println "Very good count: " cnt)
                       (if (< cnt 3)
-                        (>!! cmd-chan "y"))))]
-           ]}
+                        (>!! cmd-chan "y"))))]]}
