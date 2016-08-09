@@ -371,13 +371,13 @@
     (>!! render-chan
          #(render-selected-objectbox term-output
                                      5 5 145 5
-                                     :magenta :white :black
+                                     :magenta :yellow :black
                                      curr-object
                                      curr-ind))
     (>!! render-chan
          #(render-messagebox term-output
                              102 0 50 5
-                             :red :white :black
+                             :red :black :white
                              (str "Target: "
                                   (@session-info :target-prefix)
                                   "."
@@ -400,7 +400,7 @@
   (>!! render-chan
        #(render-objectsbox term-output
                            0 37 102 12
-                           :magenta :white :black
+                           :magenta :black :white
                            (@session-info :objects)
                            (@session-info :select-index))))
 
@@ -414,7 +414,7 @@
   (>!! render-chan
        #(render-objectsbox term-output
                            0 37 102 12
-                           :magenta :white :black
+                           :magenta :black :white
                            (@session-info :objects)
                            (@session-info :select-index))))
 
@@ -508,7 +508,7 @@
                            (>!! render-chan
                                 #(render-messagebox term-output
                                                     102 0 50 5
-                                                    :red :white :black
+                                                    :red :black :white
                                                     (str "Target: "
                                                          (@session-info :target-prefix)
                                                          "."
@@ -520,7 +520,7 @@
                            (>!! render-chan
                                 #(render-messagebox term-output
                                                     102 0 50 5
-                                                    :red :white :black
+                                                    :red :black :white
                                                     (str "Target: "
                                                          (@session-info :target-prefix)
                                                          "."

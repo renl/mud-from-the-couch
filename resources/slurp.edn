@@ -17,7 +17,7 @@
               (>!! render-chan
                    #(render-objectsbox term-output
                                        0 37 102 12
-                                       :magenta :white :black
+                                       :magenta :black :white
                                        (@session-info :objects)
                                        (@session-info :select-index))))]
 
@@ -30,7 +30,7 @@
               (>!! render-chan
                    #(render-exitsbox term-output
                                      102 14 31 11
-                                     :cyan :white :black
+                                     :cyan :black :white
                                      @session-info)))]
            
            [#"< ([0-9]+)h/([0-9]+)H ([0-9]+)v/([0-9]+)V Pos: ([a-zA-Z]+) >"
@@ -43,7 +43,7 @@
               (>!! render-chan
                    #(render-statusbox term-output
                                       102 5 50 9
-                                      :green :white :black
+                                      :green :black :white
                                       @session-info)))]
            
            [#"You lose your footing and fall to your knees!"

@@ -3,33 +3,22 @@
 
 ![mud client screenshot](https://lh4.googleusercontent.com/-ayIw0xKXZJ0/V6XqWZFyt2I/AAAAAAAANew/woxPJFsYCS8vP-szFe547aJ4BX-bjPqLACL0B/w986-h661-no/mud-client.PNG)
 
-FIXME: description
+https://youtu.be/chXeGZ4KTc0
+
+A mud client that allows you to play multi user dungeons (text based games) using an xbox controller!
 
 ## Installation
 
-Download from http://example.com/FIXME.
+TBD
 
 ## Usage
 
-FIXME: explanation
-
-    $ java -jar telnetclient-0.1.0-standalone.jar [args]
-
-## Options
-
-FIXME: listing of options this app accepts.
-
-## Examples
-
-...
+TBD
 
 ### Bugs
 
 ...
 
-### Any Other Sections
-### That You Think
-### Might be Useful
 
 ## License
 
