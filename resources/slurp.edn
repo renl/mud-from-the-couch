@@ -4,7 +4,7 @@
          }
  :trigger [
 
-           [#"Obvious exits:.+\n(?:.+\n)*?< .+ >"
+           [#"Obvious exits:.+\r?\n(?:.*\r?\n)*?< .+ >"
             (fn [objects]
               (->> objects
                    (clojure.string/split-lines)

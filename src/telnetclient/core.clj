@@ -53,11 +53,22 @@
                          :word-index 0
                          :target-prefix 1
                          :selected-target ""
-                         :binded-cmd {:1 "dragon"} 
-                         :binded-gamepad-cmds {:X "#dec-prefix"
-                                               :Y "#inc-prefix"
-                                               :A "#cmd-1"
-                                               :B "#cmd-1-target"}}))
+                         :binded-cmd {:1 "dragon"
+                                      :2 "kick"
+                                      :3 "chant quiver"
+                                      :4 "round"} 
+                         :binded-gamepad-cmds {
+                                               :left-bumper "#dec-prefix"
+                                               :right-bumper "#inc-prefix"
+                                               :X "#cmd-1"
+                                               :Y "#cmd-2"
+                                               :A "#cmd-3"
+                                               :B "#cmd-4"
+                                               :xX "#cmd-1-target"
+                                               :xY "#cmd-2-target"
+                                               :xA "#cmd-3-target"
+                                               :xB "#cmd-4-target"
+                                               }}))
 (def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
 
 
@@ -157,9 +168,35 @@
    "Left Thumb 3" :left-thumb
    "Right Thumb 3" :right-thumb})
 
-(def bin-comp-name
+(def bin-comp-name-linux-64bits
   [:A :B :X :Y :left-bumper :right-bumper :back
    :start :xbox-guide :left-thumb :right-thumb])
+
+(def bin-comp-name-windows-64bits
+  [:A :B :X :Y :left-bumper :right-bumper :back
+   :start :left-thumb :right-thumb])
+
+(def bin-comp-extra-map
+  {:A :xA
+   :B :xB
+   :X :xX
+   :Y :xY
+   :left-bumper :xleft-bumper
+   :right-bumper :xright-bumper
+   :back :xback
+   :start :xstart
+   :xbox-guide :xxbox-guide
+   :left-thumb :xleft-thumb
+   :right-thumb :xright-thumb
+   })
+
+(defn get-poll-data [comp-name components]
+  (let [comp-map (zipmap comp-name (map #(.getPollData %) components))]
+    (if (= @os-type :windows-64bits)
+      (as-> comp-map m
+          (assoc m :left-trigger (m :trigger))
+          (assoc m :right-trigger (- (m :trigger))))
+      comp-map)))
 
 (defn gamepad-jinput [controller]
   (let [components (.getComponents controller)
@@ -167,27 +204,49 @@
                     :linux-64bits (replace linux-64bits-button-translate (map #(.getName %) components))
                     :windows-64bits (replace windows-64bits-button-translate (map #(.getName %) components)))]
     (.poll controller)
-    (loop [prev-comp-map (zipmap comp-name (map (fn [comp] (.getPollData comp)) components))]
+    (loop [prev-comp-map (get-poll-data comp-name components)]
       (.poll controller)
-      (let [curr-comp-map (zipmap comp-name (map (fn [comp] (.getPollData comp)) components))]
+      (let [curr-comp-map (get-poll-data comp-name components)]
         ;; (doseq [comp components] (println (.getName comp) "\t" (.getPollData comp)))
         ;; (doseq [comp curr-comp-map] (println comp))
         ;; (println "\n\n")
-        (doseq [button bin-comp-name]
+        (doseq [button (case @os-type
+                         :linux-64bits bin-comp-name-linux-64bits
+                         :windows-64bits bin-comp-name-linux-64bits)]
           (if (and (= (prev-comp-map button) 0.0)
                    (= (curr-comp-map button) 1.0))
-            (>!! gamepad-chan button)))
+            (if (< (curr-comp-map :right-trigger) 0.5)
+              (>!! gamepad-chan button)
+              (>!! gamepad-chan (bin-comp-extra-map button)))))
         (if (= (prev-comp-map :dir-pad) 0.0)
           (case (int (* 1000 (curr-comp-map :dir-pad)))
-            125 (>!! gamepad-chan :NW)
-            250 (>!! gamepad-chan :N)
-            375 (>!! gamepad-chan :NE)
-            500 (>!! gamepad-chan :E)
-            625 (>!! gamepad-chan :SE)
-            750 (>!! gamepad-chan :S)
-            875 (>!! gamepad-chan :SW)
-            1000 (>!! gamepad-chan :W)
+            ;; 125 (>!! gamepad-chan :NW)
+            250 (>!! gamepad-chan :U)
+            ;; 375 (>!! gamepad-chan :NE)
+            ;; 500 (>!! gamepad-chan :E)
+            ;; 625 (>!! gamepad-chan :SE)
+            750 (>!! gamepad-chan :D)
+            ;; 875 (>!! gamepad-chan :SW)
+            ;; 1000 (>!! gamepad-chan :W)
             nil))
+        (if (< (Math/hypot (prev-comp-map :left-y)
+                           (prev-comp-map :left-x)) 0.5) 
+          (let [curr-x (curr-comp-map :left-x)
+                curr-y (curr-comp-map :left-y)
+                r (Math/hypot curr-x curr-y)
+                angle (+ 180 (Math/toDegrees (Math/atan2 curr-y curr-x)))]
+            (if (>= r 0.5)
+              (cond
+                (< angle 22.5) (>!! gamepad-chan :W)
+                (< angle 67.5) (>!! gamepad-chan :NW)
+                (< angle 112.5) (>!! gamepad-chan :N)
+                (< angle 157.5) (>!! gamepad-chan :NE)
+                (< angle 202.5) (>!! gamepad-chan :E)
+                (< angle 247.5) (>!! gamepad-chan :SE)
+                (< angle 292.5) (>!! gamepad-chan :S)
+                (< angle 337.5) (>!! gamepad-chan :SW)
+                :else (>!! gamepad-chan :W)
+                ))))
         (if (and (< (Math/abs (prev-comp-map :right-y)) 0.5)
                  (> (Math/abs (curr-comp-map :right-y)) 0.5))
           (if (pos? (curr-comp-map :right-y))
@@ -215,13 +274,17 @@
         :B (parse-cmd (get-in @session-info [:binded-gamepad-cmds :B]))
         :X (parse-cmd (get-in @session-info [:binded-gamepad-cmds :X]))
         :Y (parse-cmd (get-in @session-info [:binded-gamepad-cmds :Y]))
-        :left-bumper (parse-cmd "d")
-        :right-bumper (parse-cmd "u")
+        :xA (parse-cmd (get-in @session-info [:binded-gamepad-cmds :xA]))
+        :xB (parse-cmd (get-in @session-info [:binded-gamepad-cmds :xB]))
+        :xX (parse-cmd (get-in @session-info [:binded-gamepad-cmds :xX]))
+        :xY (parse-cmd (get-in @session-info [:binded-gamepad-cmds :xY]))
+        :left-bumper (parse-cmd (get-in @session-info [:binded-gamepad-cmds :left-bumper]))
+        :right-bumper (parse-cmd (get-in @session-info [:binded-gamepad-cmds :right-bumper]))
         :back nil
         :start nil
         :xbox-guide nil
         :left-thumb (parse-cmd "l")
-        :right-thumb nil
+        :right-thumb (parse-cmd "flee")
         :NW (parse-cmd "nw")
         :N (parse-cmd "n")
         :NE (parse-cmd "ne")
@@ -230,6 +293,8 @@
         :S (parse-cmd "s")
         :SW (parse-cmd "sw")
         :W (parse-cmd "w")
+        :U (parse-cmd "u")
+        :D (parse-cmd "d")
         nil)))
   (prn "Stopping handle-gamepad-cmd"))
 
@@ -387,7 +452,7 @@
          :reverse-tab nil
          :enter (do (t/clear term-input)
                     (parse-cmd))
-         \space (if-let [alias-cmd (check-alias)]
+         \space (if-let [alias-cmd (check-alias @key-buffer)]
                   (do (reset! key-buffer (str alias-cmd \space))
                       (t/clear term-input)
                       (t/put-string term-input
@@ -412,17 +477,30 @@
                  (shutdown-agents))
        "#clear" (t/clear term-output)
        "#select" (reset! interface-mode :selection)
-       "#cmd-1" (do (println "effected cmd: " (get-in @session-info [:binded-cmd :1])) (>!! cmd-chan (get-in @session-info [:binded-cmd :1])))
-       "#cmd-1-target" (do (println (str (get-in @session-info [:binded-cmd :1])
-                                         " "
-                                         (@session-info :target-prefix)
-                                         "."
-                                         (@session-info :selected-target)))
-                           (>!! cmd-chan (str (get-in @session-info [:binded-cmd :1])
-                                              " "
-                                              (@session-info :target-prefix)
-                                              "."
-                                              (@session-info :selected-target))))
+       "#cmd-1" (>!! cmd-chan (get-in @session-info [:binded-cmd :1]))
+       "#cmd-1-target" (>!! cmd-chan (str (get-in @session-info [:binded-cmd :1])
+                                          " "
+                                          (@session-info :target-prefix)
+                                          "."
+                                          (@session-info :selected-target)))
+       "#cmd-2" (>!! cmd-chan (get-in @session-info [:binded-cmd :2]))
+       "#cmd-2-target" (>!! cmd-chan (str (get-in @session-info [:binded-cmd :2])
+                                          " "
+                                          (@session-info :target-prefix)
+                                          "."
+                                          (@session-info :selected-target)))
+       "#cmd-3" (>!! cmd-chan (get-in @session-info [:binded-cmd :3]))
+       "#cmd-3-target" (>!! cmd-chan (str (get-in @session-info [:binded-cmd :3])
+                                          " "
+                                          (@session-info :target-prefix)
+                                          "."
+                                          (@session-info :selected-target)))
+       "#cmd-4" (>!! cmd-chan (get-in @session-info [:binded-cmd :4]))
+       "#cmd-4-target" (>!! cmd-chan (str (get-in @session-info [:binded-cmd :4])
+                                          " "
+                                          (@session-info :target-prefix)
+                                          "."
+                                          (@session-info :selected-target)))
        "#inc-prefix" (do (swap! session-info update :target-prefix inc)
                          (let [curr-object (@session-info :curr-object)
                                curr-ind (@session-info :word-index)
