@@ -88,6 +88,7 @@
   (t/set-bg-color scr :default)
   (t/set-fg-color scr :default))
 
+
 (defn render-rawdatabox [scr x y w h borderbg buf]
   (draw-border scr x y w h \. :default borderbg)
   (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default :default)
@@ -130,7 +131,7 @@
   (t/move-cursor scr (+ x 2) (+ y 2))
   (dorun (map-indexed
           (fn [ind word] (if (= ind word-index)
-                           (do
+                           (do 
                              (t/put-string scr "[[")
                              (t/set-bg-color scr :green)
                              (t/put-string scr word)

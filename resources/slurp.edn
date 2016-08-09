@@ -15,7 +15,7 @@
                    (swap! session-info assoc :objects))
               (swap! session-info assoc :select-index 0)
               (>!! render-chan
-                   '(render-objectsbox term-output
+                   #(render-objectsbox term-output
                                        0 37 102 12
                                        :magenta :white :black
                                        (@session-info :objects)
@@ -28,7 +28,7 @@
                             exit)
                           (re-seq #"\-(\w+)" exits)))
               (>!! render-chan
-                   '(render-exitsbox term-output
+                   #(render-exitsbox term-output
                                      102 14 31 11
                                      :cyan :white :black
                                      @session-info)))]
@@ -41,7 +41,7 @@
               (swap! session-info assoc :max-mv max-mv)
               (swap! session-info assoc :pos pos)
               (>!! render-chan
-                   '(render-statusbox term-output
+                   #(render-statusbox term-output
                                       102 5 50 9
                                       :green :white :black
                                       @session-info)))]
