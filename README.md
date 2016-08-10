@@ -1,32 +1,22 @@
-<<<<<<< HEAD
-# mud-from-the-couch
-
-![mud client screenshot](https://lh4.googleusercontent.com/-ayIw0xKXZJ0/V6XqWZFyt2I/AAAAAAAANew/woxPJFsYCS8vP-szFe547aJ4BX-bjPqLACL0B/w986-h661-no/mud-client.PNG)
-
-https://youtu.be/chXeGZ4KTc0
+# Mud from the Couch
 
 A mud client that allows you to play multi user dungeons (text based games) using an xbox controller!
 
-## Installation
+# Introduction
 
-TBD
+mud-from-the-couch in tends to transform text based adventures into an activity that can be conducted from a couch.
 
-## Usage
+It allows the user to bind specific commands to xbox gamepad buttons. Specific words can be binded as targets using a selector menu controlled by the gamepad analog stick.
 
-TBD
+The client allows the user to load a Clojure file to be evaluated  allowing the client to be modified at run time with the full power of a programming language.
 
-### Bugs
+https://youtu.be/chXeGZ4KTc0
 
-...
+![mud client screenshot](https://lh4.googleusercontent.com/-ayIw0xKXZJ0/V6XqWZFyt2I/AAAAAAAANew/woxPJFsYCS8vP-szFe547aJ4BX-bjPqLACL0B/w986-h661-no/mud-client.PNG)
 
 
 ## License
 
-Copyright © 2016 FIXME
+Copyright © 2016 Ng Cheng Leong
 
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
-=======
-# durismud-client-in-clojure
-Duris mud client written in clojure
->>>>>>> 5ed0f2d4adca2ce8b7b59d8b234005ea91de618e
+Distributed under the Eclipse Public License, the same as Clojure.
