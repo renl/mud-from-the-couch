@@ -1,7 +1,7 @@
-(ns telnetclient.guirender
+(ns mud-from-the-couch.guirender
   (:require [lanterna.terminal :as t]
-            [telnetclient.ansicode :refer [split-tag-ansi-codes translate]]
-            [telnetclient.draw :refer [draw-border draw-rect]]))
+            [mud-from-the-couch.ansicode :refer [split-tag-ansi-codes translate]]
+            [mud-from-the-couch.draw :refer [draw-border draw-rect]]))
 
 (defn split-and-tag [buf]
   (split-tag-ansi-codes (str " " buf " ")))

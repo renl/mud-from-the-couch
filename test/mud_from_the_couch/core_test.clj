@@ -1,6 +1,6 @@
-(ns telnetclient.core-test
+(ns mud-from-the-couch.core-test
   (:require [clojure.test :refer :all]
-            [telnetclient.core :refer :all]))
+            [mud-from-the-couch.core :refer :all]))
 
 (deftest a-test
   (testing "FIXME, I fail."

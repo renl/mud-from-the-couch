@@ -1,4 +1,4 @@
-(ns telnetclient.draw
+(ns mud-from-the-couch.draw
   (:require [lanterna.terminal :as t]))
 
 

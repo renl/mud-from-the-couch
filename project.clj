@@ -1,4 +1,4 @@
-(defproject telnetclient "0.1.0-SNAPSHOT"
+(defproject mud-from-the-couch "0.1.0-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
@@ -9,6 +9,6 @@
                  [org.clojure/core.async "0.2.385"]
                  [jinput "0.0.3"]
                  ]
-  :main ^:skip-aot telnetclient.core
+  :main ^:skip-aot mud-from-the-couch.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}})

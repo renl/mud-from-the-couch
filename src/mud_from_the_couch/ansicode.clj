@@ -1,4 +1,4 @@
-(ns telnetclient.ansicode)
+(ns mud-from-the-couch.ansicode)
 
 (defn split-tag-ansi-codes [text]
   (let [code (map (fn [match] {:type :code :val match})

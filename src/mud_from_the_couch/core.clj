@@ -1,6 +1,6 @@
-(ns telnetclient.core
+(ns mud-from-the-couch.core
   (:require [lanterna.terminal :as t]
-            [telnetclient.guirender :refer [render-messagebox
+            [mud-from-the-couch.guirender :refer [render-messagebox
                                             render-statusbox
                                             render-rawdatabox
                                             render-exitsbox
