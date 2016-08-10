@@ -4,7 +4,7 @@ A mud client that allows you to play multi user dungeons (text based games) usin
 
 # Introduction
 
-mud-from-the-couch in tends to transform text based adventures into an activity that can be conducted from a couch.
+mud-from-the-couch intends to transform text based adventures into an activity that can be conducted from a couch.
 
 It allows the user to bind specific commands to xbox gamepad buttons. Specific words can be binded as targets using a selector menu controlled by the gamepad analog stick.
 

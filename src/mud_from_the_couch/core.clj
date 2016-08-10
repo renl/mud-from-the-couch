@@ -364,24 +364,26 @@
 
 (defn update-word [func]
   (let [curr-object (@session-info :curr-object)
-        curr-ind (func (@session-info :word-index))
-        curr-target (curr-object curr-ind)]
-    (swap! session-info assoc :word-index curr-ind)
-    (swap! session-info assoc :selected-target curr-target)
-    (>!! render-chan
-         #(render-selected-objectbox term-output
-                                     5 5 145 5
-                                     :magenta :yellow :black
-                                     curr-object
-                                     curr-ind))
-    (>!! render-chan
-         #(render-messagebox term-output
-                             102 0 50 5
-                             :red :black :white
-                             (str "Target: "
-                                  (@session-info :target-prefix)
-                                  "."
-                                  curr-target)))))
+        curr-ind (func (@session-info :word-index))]
+    (when (and (< curr-ind (count curr-object))
+               (>= curr-ind 0))
+      (let [curr-target (curr-object curr-ind)]
+        (swap! session-info assoc :word-index curr-ind)
+        (swap! session-info assoc :selected-target curr-target)
+        (>!! render-chan
+             #(render-selected-objectbox term-output
+                                         5 5 145 5
+                                         :magenta :yellow :black
+                                         curr-object
+                                         curr-ind))
+        (>!! render-chan
+             #(render-messagebox term-output
+                                 102 0 50 5
+                                 :red :black :white
+                                 (str "Target: "
+                                      (@session-info :target-prefix)
+                                      "."
+                                      curr-target)))))))
 
 (defn prev-word []
   (update-word dec))
@@ -390,8 +392,14 @@
   (update-word inc))
 
 
-(defn prev-obj []
-  (swap! session-info update :select-index #(if (> % 0) (dec %) %))
+(defn update-obj [func]
+  (if (= func inc)
+    (swap! session-info update
+           :select-index
+           #(if (< % (dec (count (@session-info :objects)))) (func %) %))
+    (swap! session-info update
+           :select-index
+           #(if (> % 0) (func %) %)))
   (swap! session-info assoc
          :curr-object
          (clojure.string/split
@@ -404,19 +412,11 @@
                            (@session-info :objects)
                            (@session-info :select-index))))
 
+(defn prev-obj []
+  (update-obj dec))
+
 (defn next-obj []
-  (swap! session-info update :select-index #(if (< % 19) (inc %) %))
-  (swap! session-info assoc
-         :curr-object
-         (clojure.string/split
-          (get-in @session-info
-                  [:objects (@session-info :select-index)]) #" ")) 
-  (>!! render-chan
-       #(render-objectsbox term-output
-                           0 37 102 12
-                           :magenta :black :white
-                           (@session-info :objects)
-                           (@session-info :select-index))))
+  (update-obj inc))
 
 (defn key-stroke-capturer []
   (t/in-terminal
