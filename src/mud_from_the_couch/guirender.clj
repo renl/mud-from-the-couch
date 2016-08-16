@@ -1,71 +1,6 @@
 (ns mud-from-the-couch.guirender
   (:require [lanterna.terminal :as t]
-            [mud-from-the-couch.ansicode :refer [split-tag-ansi-codes translate]]
             [mud-from-the-couch.draw :refer [draw-border draw-rect]]))
-
-(defn split-and-tag [buf]
-  (split-tag-ansi-codes (str " " buf " ")))
-
-
-(defn trunc-text-96 [buf]
-  (loop [tags buf
-         space-left 96
-         curr-line []
-         packed-lines []]
-    (let [tag (first tags)]
-      (if tag
-        (case (tag :type)
-          :code (recur (rest tags)
-                       space-left
-                       (conj curr-line tag)
-                       packed-lines)
-          :text (let [char-count (count (tag :val))
-                      spill-over-count (- char-count space-left)
-                      next-tags (rest tags)]
-                  (if (> spill-over-count 0)
-                    (recur (conj next-tags
-                                 (update tag
-                                         :val
-                                         #((comp (partial apply str " ")
-                                                 drop) %2 %1)
-                                         space-left))
-                           96
-                           []
-                           (conj packed-lines
-                                 (conj curr-line
-                                       (update tag
-                                               :val
-                                               #((comp (partial apply str)
-                                                       take) %2 %1)
-                                               space-left))))
-                    (recur next-tags
-                           (- space-left char-count)
-                           (conj curr-line tag)
-                           packed-lines))))
-        (conj packed-lines curr-line)))))
-
-(defn prep-buf [buf rows]
-  (->> buf
-       (map split-and-tag)
-       (map trunc-text-96) 
-       (apply concat) 
-       (vec)
-       (take-last rows)))
-
-(defn put-coded-text [scr tags line]
-  (t/move-cursor scr 1 line)
-  (doseq [tag tags]
-    (case (tag :type)
-      :code (doseq [action (translate (tag :val))]
-              (case (action :set)
-                :default (do (t/set-fg-color scr :default)
-                             (t/set-bg-color scr :default))
-                :style nil
-                :fg-bg-color (do (t/set-fg-color scr (action :val1))
-                                 (t/set-bg-color scr (action :val2)))
-                :fg-color (t/set-fg-color scr (action :val))
-                :bg-color (t/set-bg-color scr (action :val))))
-      :text (t/put-string scr (tag :val)))))
 
 (defn render-messagebox [scr x y w h borderbg fillbg fillfg msg]
   (draw-border scr x y w h \. :default borderbg)
@@ -87,18 +22,6 @@
     (t/put-string scr (str "POS: " pos) (+ x 2) (+ y 6)))
   (t/set-bg-color scr :default)
   (t/set-fg-color scr :default))
-
-
-(defn render-rawdatabox [scr x y w h borderbg buf]
-  (draw-border scr x y w h \. :default borderbg)
-  (draw-rect scr (inc x) (inc y) (- w 2) (- h 2) \space :default :default)
-  (dorun (map-indexed
-          (fn [line text]
-            ;; (t/put-string term-output text 1 (inc line))
-            (put-coded-text scr text (inc line))
-            )
-          (prep-buf buf (- h 2)))))
-
 
 (defn render-exitsbox [scr x y w h borderbg fillbg fillfg info]
   (draw-border scr x y w h \. :default borderbg)

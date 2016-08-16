@@ -1,11 +1,15 @@
 (ns mud-from-the-couch.core
   (:require [lanterna.terminal :as t]
+            [seesaw.core :as s]
+            [seesaw.dev :as d]
             [mud-from-the-couch.guirender :refer [render-messagebox
                                             render-statusbox
-                                            render-rawdatabox
                                             render-exitsbox
                                             render-objectsbox
                                             render-selected-objectbox]]
+            [mud-from-the-couch.ansicode :refer [generate-markup
+                                                 parse-markup
+                                                 remove-ansi-escape-code]]
             [clojure.core.async :refer [<! >! <!! >!! chan go close!]])
   (:import [org.apache.commons.net.telnet
             TelnetClient
@@ -53,10 +57,11 @@
                          :word-index 0
                          :target-prefix 1
                          :selected-target ""
-                         :binded-cmd {:1 "dragon"
-                                      :2 "kick"
-                                      :3 "chant quiver"
-                                      :4 "round"} 
+                         :binded-cmd {:1 ["dragon"]
+                                      :2 ["kneel" "spring"]
+                                      :3 ["chant quiver"]
+                                      :4 ["chant regen"]
+                                      :5 ["chant hero"]} 
                          :binded-gamepad-cmds {
                                                :left-bumper "#dec-prefix"
                                                :right-bumper "#inc-prefix"
@@ -64,12 +69,93 @@
                                                :Y "#cmd-2"
                                                :A "#cmd-3"
                                                :B "#cmd-4"
-                                               :xX "#cmd-1-target"
-                                               :xY "#cmd-2-target"
-                                               :xA "#cmd-3-target"
-                                               :xB "#cmd-4-target"
+                                               :rxX "#cmd-1-target"
+                                               :rxY "#cmd-2-target"
+                                               :rxA "#cmd-3-target"
+                                               :rxB "#cmd-5"
                                                }}))
 (def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
+
+
+;; Seesaw
+;; =============================================================================
+
+(s/native!)
+
+(def colors {:black "#303030"
+             :red :red
+             :green :green
+             :yellow :yellow
+             :blue :blue
+             :magenta :magenta
+             :cyan :cyan
+             :white :white})
+(def background-colors {:black :black
+                        :red :red
+                        :green :green
+                        :yellow :yellow
+                        :blue :blue
+                        :magenta :magenta
+                        :cyan :cyan
+                        :white :white})
+
+(def styles
+  (doall
+   (for [color (keys colors)
+         background (keys background-colors)
+         bold [true false]
+         italic [true false]
+         underline [true false]]
+     [(str color background bold italic underline)
+      :color (colors color)
+      :background (background-colors background)
+      :bold bold
+      :italic italic
+      :underline underline])))
+
+(def server-output-pane
+  (s/styled-text :text "Hello world"
+                 :wrap-lines? true
+                 :preferred-size [640 :by 640]
+                 :editable? false
+                 :background :black
+                 :foreground :white
+                 :styles styles))
+
+(def info-pane
+  (s/styled-text :text "" 
+                 :wrap-lines? true
+                 :preferred-size [640 :by 640]
+                 :editable? false
+                 :background :black
+                 :foreground :white
+                 :styles styles))
+
+(def display-area
+  (s/left-right-split (s/scrollable server-output-pane)
+                      (s/scrollable info-pane)
+                      :divider-location 1/2))
+
+(def input-textbox
+  (s/text :editable? true
+          :multi-line? false
+          :listen [:key-typed (fn [e]
+                                (condp = (.getKeyChar e)
+                                  \newline (do (>!! cmd-chan (s/config input-textbox :text))
+                                               (s/config! input-textbox :text ""))
+                                  e))]))
+
+(def main-panel (s/border-panel :center display-area
+                                :south input-textbox))
+
+(def main-window (s/frame :title "mud on the couch"
+                          :content main-panel))
+
+(-> main-window s/pack! s/show!)
+
+(d/show-options server-output-pane)
+
+
 
 
 
@@ -176,18 +262,18 @@
   [:A :B :X :Y :left-bumper :right-bumper :back
    :start :left-thumb :right-thumb])
 
-(def bin-comp-extra-map
-  {:A :xA
-   :B :xB
-   :X :xX
-   :Y :xY
-   :left-bumper :xleft-bumper
-   :right-bumper :xright-bumper
-   :back :xback
-   :start :xstart
-   :xbox-guide :xxbox-guide
-   :left-thumb :xleft-thumb
-   :right-thumb :xright-thumb
+(def bin-comp-right-extra-map
+  {:A :rxA
+   :B :rxB
+   :X :rxX
+   :Y :rxY
+   :left-bumper :rxleft-bumper
+   :right-bumper :rxright-bumper
+   :back :rxback
+   :start :rxstart
+   :xbox-guide :rxxbox-guide
+   :left-thumb :rxleft-thumb
+   :right-thumb :rxright-thumb
    })
 
 (defn get-poll-data [comp-name components]
@@ -207,9 +293,6 @@
     (loop [prev-comp-map (get-poll-data comp-name components)]
       (.poll controller)
       (let [curr-comp-map (get-poll-data comp-name components)]
-        ;; (doseq [comp components] (println (.getName comp) "\t" (.getPollData comp)))
-        ;; (doseq [comp curr-comp-map] (println comp))
-        ;; (println "\n\n")
         (doseq [button (case @os-type
                          :linux-64bits bin-comp-name-linux-64bits
                          :windows-64bits bin-comp-name-linux-64bits)]
@@ -217,17 +300,11 @@
                    (= (curr-comp-map button) 1.0))
             (if (< (curr-comp-map :right-trigger) 0.5)
               (>!! gamepad-chan button)
-              (>!! gamepad-chan (bin-comp-extra-map button)))))
+              (>!! gamepad-chan (bin-comp-right-extra-map button)))))
         (if (= (prev-comp-map :dir-pad) 0.0)
           (case (int (* 1000 (curr-comp-map :dir-pad)))
-            ;; 125 (>!! gamepad-chan :NW)
             250 (>!! gamepad-chan :U)
-            ;; 375 (>!! gamepad-chan :NE)
-            ;; 500 (>!! gamepad-chan :E)
-            ;; 625 (>!! gamepad-chan :SE)
             750 (>!! gamepad-chan :D)
-            ;; 875 (>!! gamepad-chan :SW)
-            ;; 1000 (>!! gamepad-chan :W)
             nil))
         (if (< (Math/hypot (prev-comp-map :left-y)
                            (prev-comp-map :left-x)) 0.5) 
@@ -274,10 +351,10 @@
         :B (parse-cmd (get-in @session-info [:binded-gamepad-cmds :B]))
         :X (parse-cmd (get-in @session-info [:binded-gamepad-cmds :X]))
         :Y (parse-cmd (get-in @session-info [:binded-gamepad-cmds :Y]))
-        :xA (parse-cmd (get-in @session-info [:binded-gamepad-cmds :xA]))
-        :xB (parse-cmd (get-in @session-info [:binded-gamepad-cmds :xB]))
-        :xX (parse-cmd (get-in @session-info [:binded-gamepad-cmds :xX]))
-        :xY (parse-cmd (get-in @session-info [:binded-gamepad-cmds :xY]))
+        :rxA (parse-cmd (get-in @session-info [:binded-gamepad-cmds :rxA]))
+        :rxB (parse-cmd (get-in @session-info [:binded-gamepad-cmds :rxB]))
+        :rxX (parse-cmd (get-in @session-info [:binded-gamepad-cmds :rxX]))
+        :rxY (parse-cmd (get-in @session-info [:binded-gamepad-cmds :rxY]))
         :left-bumper (parse-cmd (get-in @session-info [:binded-gamepad-cmds :left-bumper]))
         :right-bumper (parse-cmd (get-in @session-info [:binded-gamepad-cmds :right-bumper]))
         :back nil
@@ -340,8 +417,7 @@
        (clojure.string/join " " kb)
        (reset! key-buffer kb)))
 
-(defn remove-ansi-code [text]
-  (clojure.string/replace text #"\u001b\[[^m]+m" ""))
+
 
 (defn tab-complete []
   (let [prev-key (second @key-stroke-buffer)
@@ -351,11 +427,7 @@
                                       "\\w+"))]
     (if (= prev-key :tab)
       (swap! tab-complete-list (comp set rest))
-      (->> (take-last 5000 @screen-buffer)
-           ;; (reverse)
-           (concat)
-           (apply str)
-           (remove-ansi-code)
+      (->> (.getText server-output-pane)
            (re-seq search-regex)
            (set)
            (reset! tab-complete-list)))
@@ -477,30 +549,39 @@
                  (shutdown-agents))
        "#clear" (t/clear term-output)
        "#select" (reset! interface-mode :selection)
-       "#cmd-1" (>!! cmd-chan (get-in @session-info [:binded-cmd :1]))
-       "#cmd-1-target" (>!! cmd-chan (str (get-in @session-info [:binded-cmd :1])
-                                          " "
-                                          (@session-info :target-prefix)
+       "#cmd-1" (doseq [cmd (get-in @session-info [:binded-cmd :1])] (>!! cmd-chan cmd))
+       "#cmd-2" (doseq [cmd (get-in @session-info [:binded-cmd :2])] (>!! cmd-chan cmd))
+       "#cmd-3" (doseq [cmd (get-in @session-info [:binded-cmd :3])] (>!! cmd-chan cmd))
+       "#cmd-4" (doseq [cmd (get-in @session-info [:binded-cmd :4])] (>!! cmd-chan cmd))
+       "#cmd-5" (doseq [cmd (get-in @session-info [:binded-cmd :5])] (>!! cmd-chan cmd))
+       "#cmd-1-target" (let [target (str (@session-info :target-prefix)
                                           "."
-                                          (@session-info :selected-target)))
-       "#cmd-2" (>!! cmd-chan (get-in @session-info [:binded-cmd :2]))
-       "#cmd-2-target" (>!! cmd-chan (str (get-in @session-info [:binded-cmd :2])
-                                          " "
-                                          (@session-info :target-prefix)
+                                          (@session-info :selected-target))
+                             cmds (get-in @session-info [:binded-cmd :1])]
+                         (doseq [cmd (butlast cmds)]
+                           (>!! cmd-chan cmd))
+                         (>!! cmd-chan (str (last cmds) " " target)))
+       "#cmd-2-target" (let [target (str (@session-info :target-prefix)
                                           "."
-                                          (@session-info :selected-target)))
-       "#cmd-3" (>!! cmd-chan (get-in @session-info [:binded-cmd :3]))
-       "#cmd-3-target" (>!! cmd-chan (str (get-in @session-info [:binded-cmd :3])
-                                          " "
-                                          (@session-info :target-prefix)
+                                          (@session-info :selected-target))
+                             cmds (get-in @session-info [:binded-cmd :2])]
+                         (doseq [cmd (butlast cmds)]
+                           (>!! cmd-chan cmd))
+                         (>!! cmd-chan (str (last cmds) " " target)))
+       "#cmd-3-target" (let [target (str (@session-info :target-prefix)
                                           "."
-                                          (@session-info :selected-target)))
-       "#cmd-4" (>!! cmd-chan (get-in @session-info [:binded-cmd :4]))
-       "#cmd-4-target" (>!! cmd-chan (str (get-in @session-info [:binded-cmd :4])
-                                          " "
-                                          (@session-info :target-prefix)
+                                          (@session-info :selected-target))
+                             cmds (get-in @session-info [:binded-cmd :3])]
+                         (doseq [cmd (butlast cmds)]
+                           (>!! cmd-chan cmd))
+                         (>!! cmd-chan (str (last cmds) " " target)))
+       "#cmd-4-target" (let [target (str (@session-info :target-prefix)
                                           "."
-                                          (@session-info :selected-target)))
+                                          (@session-info :selected-target))
+                             cmds (get-in @session-info [:binded-cmd :4])]
+                         (doseq [cmd (butlast cmds)]
+                           (>!! cmd-chan cmd))
+                         (>!! cmd-chan (str (last cmds) " " target)))
        "#inc-prefix" (do (swap! session-info update :target-prefix inc)
                          (let [curr-object (@session-info :curr-object)
                                curr-ind (@session-info :word-index)
@@ -545,20 +626,15 @@
   (prn "Stopping print-server-output"))
 
 
-(defn render-runner []
-  (render-rawdatabox term-output 0 0 102 37 :blue nil)
-  (render-messagebox term-output 102 0 50 5 :red :white :black nil)
-  (render-statusbox term-output 102 5 50 9 :green :white :black nil)
-  (render-exitsbox term-output 102 14 31 11 :cyan :white :black nil)
-  (render-objectsbox term-output 0 37 102 12 :magenta :white :black nil 0)
-  (while @running
-    (let [render-function (<!! render-chan)]
-      (render-function)))
-  (prn "Stopping render-runner"))
-
-
-(defn print-to-screen [buf]
-  (>!! render-chan #(render-rawdatabox term-output 0 0 102 37 :blue buf)))
+(defn print-to-server-output-pane []
+  (while @running 
+    (let [recv-str (<!! screen-chan)
+          decolored-str (remove-ansi-escape-code recv-str)]
+      (-> recv-str
+          (generate-markup)
+          (parse-markup (.getDocument server-output-pane)))
+      (s/scroll! server-output-pane :to :bottom)
+      (>!! trigger-chan decolored-str))))
 
 
 (defn handle-screen-buffer [lines]
@@ -568,20 +644,6 @@
                (take-last 5000)
                (vec))
          lines))
-
-
-
-(defn server-output-printer []
-  (t/in-terminal
-   term-output
-   (while @running
-     (let [recv-str (<!! screen-chan)
-           recv-str-split (clojure.string/split-lines recv-str)
-           decolored-recv-str (remove-ansi-code recv-str)]
-       (handle-screen-buffer recv-str-split)
-       (>!! trigger-chan decolored-recv-str)
-       (print-to-screen (take-last 40 @screen-buffer)))))
-  (prn "Stopping consume-recv-str"))
 
 
 (defn re-to-act [buf]
@@ -629,9 +691,8 @@
   (prn "Mud starting..............")
   (future (key-stroke-capturer))
   (future (server-output-receiver))
-  (future (server-output-printer))
   (future (cmd-sender))
   (future (handle-triggers))
   (future (gamepad-jinput (find-controller)))
   (future (handle-gamepad-cmd))
-  (future (render-runner)))
+  (future (print-to-server-output-pane)))

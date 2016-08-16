@@ -4,59 +4,60 @@
          }
  :trigger [
 
-           [#"Obvious exits:.+\r?\n(?:.*\r?\n)*?< .+ >"
-            (fn [objects]
-              (->> objects
-                   (clojure.string/split-lines)
-                   (rest)
-                   (butlast)
-                   (take-last 20)
-                   (vec)
-                   (swap! session-info assoc :objects))
-              (swap! session-info assoc :select-index 0)
-              (>!! render-chan
-                   #(render-objectsbox term-output
-                                       0 37 102 12
-                                       :magenta :black :white
-                                       (@session-info :objects)
-                                       (@session-info :select-index))))]
+           ;; [#"Obvious exits:.+\r?\n(?:.*\r?\n)*?< .+ >"
+           ;;  (fn [objects]
+           ;;    (->> objects
+           ;;         (clojure.string/split-lines)
+           ;;         (rest)
+           ;;         (butlast)
+           ;;         (take-last 20)
+           ;;         (vec)
+           ;;         (swap! session-info assoc :objects))
+           ;;    (swap! session-info assoc :select-index 0)
+           ;;    (>!! render-chan
+           ;;         #(render-objectsbox term-output
+           ;;                             0 37 102 12
+           ;;                             :magenta :black :white
+           ;;                             (@session-info :objects)
+           ;;                             (@session-info :select-index))))]
 
-           [#"Obvious exits:(.+)"
-            (fn [[_ exits]]
-              (swap! session-info assoc :exits
-                     (map (fn [[_ exit]]
-                            exit)
-                          (re-seq #"\-(\w+)" exits)))
-              (>!! render-chan
-                   #(render-exitsbox term-output
-                                     102 14 31 11
-                                     :cyan :black :white
-                                     @session-info)))]
+           ;; [#"Obvious exits:(.+)"
+           ;;  (fn [[_ exits]]
+           ;;    (swap! session-info assoc :exits
+           ;;           (map (fn [[_ exit]]
+           ;;                  exit)
+           ;;                (re-seq #"\-(\w+)" exits)))
+           ;;    (>!! render-chan
+           ;;         #(render-exitsbox term-output
+           ;;                           102 14 31 11
+           ;;                           :cyan :black :white
+           ;;                           @session-info)))]
            
-           [#"< ([0-9]+)h/([0-9]+)H ([0-9]+)v/([0-9]+)V Pos: ([a-zA-Z]+) >"
-            (fn [[_ hp max-hp mv max-mv pos]]
-              (swap! session-info assoc :hp hp)
-              (swap! session-info assoc :max-hp max-hp)
-              (swap! session-info assoc :mv mv)
-              (swap! session-info assoc :max-mv max-mv)
-              (swap! session-info assoc :pos pos)
-              (>!! render-chan
-                   #(render-statusbox term-output
-                                      102 5 50 9
-                                      :green :black :white
-                                      @session-info)))]
+           ;; [#"< ([0-9]+)h/([0-9]+)H ([0-9]+)v/([0-9]+)V Pos: ([a-zA-Z]+) >"
+           ;;  (fn [[_ hp max-hp mv max-mv pos]]
+           ;;    (swap! session-info assoc :hp hp)
+           ;;    (swap! session-info assoc :max-hp max-hp)
+           ;;    (swap! session-info assoc :mv mv)
+           ;;    (swap! session-info assoc :max-mv max-mv)
+           ;;    (swap! session-info assoc :pos pos)
+           ;;    (>!! render-chan
+           ;;         #(render-statusbox term-output
+           ;;                            102 5 50 9
+           ;;                            :green :black :white
+           ;;                            @session-info)))]
            
-           [#"You lose your footing and fall to your knees!"
-            (fn [_] (>!! cmd-chan "st"))]
+           ;; [#"You lose your footing and fall to your knees!"
+           ;;  (fn [_] (>!! cmd-chan "st"))]
            
-           [#"Your basic stats:"
-            (fn [_] (swap! client-mods assoc :stat-counter 0))]
+           ;; [#"Your basic stats:"
+           ;;  (fn [_] (swap! client-mods assoc :stat-counter 0))]
 
-           [#"very good"
-            (fn [_] (swap! client-mods update :stat-counter inc))]
+           ;; [#"very good"
+           ;;  (fn [_] (swap! client-mods update :stat-counter inc))]
 
-           [#"Do you want to reroll"
-            (fn [_] (let [cnt (@client-mods :stat-counter)]
-                      (println "Very good count: " cnt)
-                      (if (< cnt 3)
-                        (>!! cmd-chan "y"))))]]}
+           ;; [#"Do you want to reroll"
+           ;;  (fn [_] (let [cnt (@client-mods :stat-counter)]
+           ;;            (println "Very good count: " cnt)
+           ;;            (if (< cnt 3)
+           ;;              (>!! cmd-chan "y"))))]
+           ]}

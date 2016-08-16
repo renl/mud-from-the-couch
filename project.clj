@@ -8,6 +8,7 @@
                  [clojure-lanterna "0.9.4"]
                  [org.clojure/core.async "0.2.385"]
                  [jinput "0.0.3"]
+                 [seesaw "1.4.5"]
                  ]
   :main ^:skip-aot mud-from-the-couch.core
   :target-path "target/%s"
