@@ -5,10 +5,10 @@
             [seesaw.keystroke :as k]
             [seesaw.keymap :as m]
             [mud-from-the-couch.guirender :refer [render-messagebox
-                                            render-statusbox
-                                            render-exitsbox
-                                            render-objectsbox
-                                            render-selected-objectbox]]
+                                                  render-statusbox
+                                                  render-exitsbox
+                                                  render-objectsbox
+                                                  render-selected-objectbox]]
             [mud-from-the-couch.ansicode :refer [generate-markup
                                                  parse-markup
                                                  remove-ansi-escape-code]]
@@ -20,10 +20,17 @@
             TerminalTypeOptionHandler
             EchoOptionHandler
             SuppressGAOptionHandler]
-           )
+           [java.awt.event KeyEvent])
   (:gen-class))
 
-(declare parse-cmd cmd-chan term-output prev-obj prev-word next-obj next-word)
+(declare parse-cmd
+         cmd-chan
+         term-output
+         prev-obj
+         prev-word
+         next-obj
+         next-word
+         tab-complete)
 
 
 ;; Async channel
@@ -43,39 +50,42 @@
 (def in-buf (byte-array 1024))
 (def screen-buffer (atom []))
 (def log (atom []))
-(def session-info (atom {:tab-complete {:tab-complete-set #{}
-                                        :tab-complete-word ""
-                                        :tab-complete-tab-count 0}
-                         :mode :input-key
-                         :hp "unknown"
-                         :max-hp "unknown"
-                         :mv "unknown"
-                         :max-mv "unknown"
-                         :pos "unknown"
-                         :exits []
-                         :objects []
-                         :select-index 0
-                         :curr-object []
-                         :word-index 0
-                         :target-prefix 1
-                         :selected-target ""
-                         :binded-cmd {:1 ["dragon"]
-                                      :2 ["kneel" "spring"]
-                                      :3 ["chant quiver"]
-                                      :4 ["chant regen"]
-                                      :5 ["chant hero"]} 
-                         :binded-gamepad-cmds {
-                                               :left-bumper "#dec-prefix"
-                                               :right-bumper "#inc-prefix"
-                                               :X "#cmd-1"
-                                               :Y "#cmd-2"
-                                               :A "#cmd-3"
-                                               :B "#cmd-4"
-                                               :rxX "#cmd-1-target"
-                                               :rxY "#cmd-2-target"
-                                               :rxA "#cmd-3-target"
-                                               :rxB "#cmd-5"
-                                               }}))
+(def session-state
+  (atom
+   {:tab-complete {:tab-complete-set #{}
+                   :tab-complete-word ""
+                   :tab-complete-tab-count 0}
+    :key-press-history '()
+    :mode :input-key
+    :hp "unknown"
+    :max-hp "unknown"
+    :mv "unknown"
+    :max-mv "unknown"
+    :pos "unknown"
+    :exits []
+    :objects []
+    :select-index 0
+    :curr-object []
+    :word-index 0
+    :target-prefix 1
+    :selected-target ""
+    :binded-cmd {:1 ["dragon"]
+                 :2 ["kneel" "spring"]
+                 :3 ["chant quiver"]
+                 :4 ["chant regen"]
+                 :5 ["chant hero"]} 
+    :binded-gamepad-cmds {
+                          :left-bumper "#dec-prefix"
+                          :right-bumper "#inc-prefix"
+                          :X "#cmd-1"
+                          :Y "#cmd-2"
+                          :A "#cmd-3"
+                          :B "#cmd-4"
+                          :rxX "#cmd-1-target"
+                          :rxY "#cmd-2-target"
+                          :rxA "#cmd-3-target"
+                          :rxB "#cmd-5"
+                          }}))
 (def client-mods (atom (eval (read-string (slurp "resources/slurp.edn")))))
 
 
@@ -139,14 +149,7 @@
 
 (def input-textbox
   (s/text :editable? true
-          :multi-line? false
-          ;; :listen [:key-typed (fn [e]
-          ;;                       (condp = (.getKeyChar e)
-          ;;                         (k/keystroke "ENTER") (do (parse-cmd (s/config input-textbox :text))
-          ;;                                (s/config! input-textbox :text ""))
-                                  
-          ;;                         e))]
-          ))
+          :multi-line? false))
 
 (.setFocusTraversalKeysEnabled input-textbox false)
 
@@ -156,6 +159,12 @@
 (def main-window (s/frame :title "mud on the couch"
                           :content main-panel))
 
+(s/listen input-textbox :key-pressed
+          (fn [e] (swap! session-state
+                         update
+                         :key-press-history
+                         conj (.getKeyCode e))))
+;; (KeyEvent/VK_TAB)
 
 (m/map-key input-textbox "TAB" (fn [e] (-> (s/config input-textbox
                                                      :text)
@@ -241,40 +250,44 @@
 
 (defn tab-complete [cmd]
   (if (not= cmd
-            (get-in @session-info
+            (get-in @session-state
                     [:tab-complete :tab-complete-word]))
-    (swap! session-info
+    (swap! session-state
            update
            :tab-complete
            assoc
            :tab-complete-word cmd
            :tab-complete-tab-count 0)
-    ())
+    (swap! session-state
+           update-in
+           [:tab-complete :tab-complete-tab-count] 
+           inc))
 
 
 
-  (let [prev-key (second @key-stroke-buffer)
-        search-regex (re-pattern (str "\\b"
-                                      (last (clojure.string/split
-                                             @key-buffer #" "))
-                                      "\\w+"))]
-    (if (= prev-key :tab)
-      (swap! tab-complete-list (comp set rest))
-      (->> (.getText server-output-pane)
-           (re-seq search-regex)
-           (set)
-           (reset! tab-complete-list)))
-    (key-buffer-replace-last-word (first @tab-complete-list))
-    (print-key-buffer)))
+  ;; (let [prev-key (second @key-stroke-buffer)
+  ;;       search-regex (re-pattern (str "\\b"
+  ;;                                     (last (clojure.string/split
+  ;;                                            @key-buffer #" "))
+  ;;                                     "\\w+"))]
+  ;;   (if (= prev-key :tab)
+  ;;     (swap! tab-complete-list (comp set rest))
+  ;;     (->> (.getText server-output-pane)
+  ;;          (re-seq search-regex)
+  ;;          (set)
+  ;;          (reset! tab-complete-list)))
+  ;;   (key-buffer-replace-last-word (first @tab-complete-list))
+  ;;   (print-key-buffer))
+  )
 
 (defn update-word [func]
-  (let [curr-object (@session-info :curr-object)
-        curr-ind (func (@session-info :word-index))]
+  (let [curr-object (@session-state :curr-object)
+        curr-ind (func (@session-state :word-index))]
     (when (and (< curr-ind (count curr-object))
                (>= curr-ind 0))
       (let [curr-target (curr-object curr-ind)]
-        (swap! session-info assoc :word-index curr-ind)
-        (swap! session-info assoc :selected-target curr-target)
+        (swap! session-state assoc :word-index curr-ind)
+        (swap! session-state assoc :selected-target curr-target)
         (>!! render-chan
              #(render-selected-objectbox term-output
                                          5 5 145 5
@@ -286,7 +299,7 @@
                                  102 0 50 5
                                  :red :black :white
                                  (str "Target: "
-                                      (@session-info :target-prefix)
+                                      (@session-state :target-prefix)
                                       "."
                                       curr-target)))))))
 
@@ -299,23 +312,23 @@
 
 (defn update-obj [func]
   (if (= func inc)
-    (swap! session-info update
+    (swap! session-state update
            :select-index
-           #(if (< % (dec (count (@session-info :objects)))) (func %) %))
-    (swap! session-info update
+           #(if (< % (dec (count (@session-state :objects)))) (func %) %))
+    (swap! session-state update
            :select-index
            #(if (> % 0) (func %) %)))
-  (swap! session-info assoc
+  (swap! session-state assoc
          :curr-object
          (clojure.string/split
-          (get-in @session-info
-                  [:objects (@session-info :select-index)]) #" "))
+          (get-in @session-state
+                  [:objects (@session-state :select-index)]) #" "))
   (>!! render-chan
        #(render-objectsbox term-output
                            0 37 102 12
                            :magenta :black :white
-                           (@session-info :objects)
-                           (@session-info :select-index))))
+                           (@session-state :objects)
+                           (@session-state :select-index))))
 
 (defn prev-obj []
   (update-obj dec))
@@ -334,62 +347,62 @@
                 (close! screen-chan)
                 (shutdown-agents))
       "#clear" (s/config! server-output-pane :text "")
-      "#select" (swap! session-info assoc :mode :input-key)
-      "#cmd-1" (doseq [cmd (get-in @session-info [:binded-cmd :1])] (>!! cmd-chan cmd))
-      "#cmd-2" (doseq [cmd (get-in @session-info [:binded-cmd :2])] (>!! cmd-chan cmd))
-      "#cmd-3" (doseq [cmd (get-in @session-info [:binded-cmd :3])] (>!! cmd-chan cmd))
-      "#cmd-4" (doseq [cmd (get-in @session-info [:binded-cmd :4])] (>!! cmd-chan cmd))
-      "#cmd-5" (doseq [cmd (get-in @session-info [:binded-cmd :5])] (>!! cmd-chan cmd))
-      "#cmd-1-target" (let [target (str (@session-info :target-prefix)
+      "#select" (swap! session-state assoc :mode :input-key)
+      "#cmd-1" (doseq [cmd (get-in @session-state [:binded-cmd :1])] (>!! cmd-chan cmd))
+      "#cmd-2" (doseq [cmd (get-in @session-state [:binded-cmd :2])] (>!! cmd-chan cmd))
+      "#cmd-3" (doseq [cmd (get-in @session-state [:binded-cmd :3])] (>!! cmd-chan cmd))
+      "#cmd-4" (doseq [cmd (get-in @session-state [:binded-cmd :4])] (>!! cmd-chan cmd))
+      "#cmd-5" (doseq [cmd (get-in @session-state [:binded-cmd :5])] (>!! cmd-chan cmd))
+      "#cmd-1-target" (let [target (str (@session-state :target-prefix)
                                         "."
-                                        (@session-info :selected-target))
-                            cmds (get-in @session-info [:binded-cmd :1])]
+                                        (@session-state :selected-target))
+                            cmds (get-in @session-state [:binded-cmd :1])]
                         (doseq [cmd (butlast cmds)]
                           (>!! cmd-chan cmd))
                         (>!! cmd-chan (str (last cmds) " " target)))
-      "#cmd-2-target" (let [target (str (@session-info :target-prefix)
+      "#cmd-2-target" (let [target (str (@session-state :target-prefix)
                                         "."
-                                        (@session-info :selected-target))
-                            cmds (get-in @session-info [:binded-cmd :2])]
+                                        (@session-state :selected-target))
+                            cmds (get-in @session-state [:binded-cmd :2])]
                         (doseq [cmd (butlast cmds)]
                           (>!! cmd-chan cmd))
                         (>!! cmd-chan (str (last cmds) " " target)))
-      "#cmd-3-target" (let [target (str (@session-info :target-prefix)
+      "#cmd-3-target" (let [target (str (@session-state :target-prefix)
                                         "."
-                                        (@session-info :selected-target))
-                            cmds (get-in @session-info [:binded-cmd :3])]
+                                        (@session-state :selected-target))
+                            cmds (get-in @session-state [:binded-cmd :3])]
                         (doseq [cmd (butlast cmds)]
                           (>!! cmd-chan cmd))
                         (>!! cmd-chan (str (last cmds) " " target)))
-      "#cmd-4-target" (let [target (str (@session-info :target-prefix)
+      "#cmd-4-target" (let [target (str (@session-state :target-prefix)
                                         "."
-                                        (@session-info :selected-target))
-                            cmds (get-in @session-info [:binded-cmd :4])]
+                                        (@session-state :selected-target))
+                            cmds (get-in @session-state [:binded-cmd :4])]
                         (doseq [cmd (butlast cmds)]
                           (>!! cmd-chan cmd))
                         (>!! cmd-chan (str (last cmds) " " target)))
-      "#inc-prefix" (do (swap! session-info update :target-prefix inc)
-                        (let [curr-object (@session-info :curr-object)
-                              curr-ind (@session-info :word-index)
+      "#inc-prefix" (do (swap! session-state update :target-prefix inc)
+                        (let [curr-object (@session-state :curr-object)
+                              curr-ind (@session-state :word-index)
                               curr-target (curr-object curr-ind)]
                           (>!! render-chan
                                #(render-messagebox term-output
                                                    102 0 50 5
                                                    :red :black :white
                                                    (str "Target: "
-                                                        (@session-info :target-prefix)
+                                                        (@session-state :target-prefix)
                                                         "."
                                                         curr-target)))))
-      "#dec-prefix" (do (swap! session-info update :target-prefix dec)
-                        (let [curr-object (@session-info :curr-object)
-                              curr-ind (@session-info :word-index)
+      "#dec-prefix" (do (swap! session-state update :target-prefix dec)
+                        (let [curr-object (@session-state :curr-object)
+                              curr-ind (@session-state :word-index)
                               curr-target (curr-object curr-ind)]
                           (>!! render-chan
                                #(render-messagebox term-output
                                                    102 0 50 5
                                                    :red :black :white
                                                    (str "Target: "
-                                                        (@session-info :target-prefix)
+                                                        (@session-state :target-prefix)
                                                         "."
                                                         curr-target)))))
       "#load" (reset! client-mods (eval
@@ -464,16 +477,16 @@
         :right-y-up (prev-obj)
         :right-x-right (next-word)
         :right-x-left (prev-word)
-        :A (parse-cmd (get-in @session-info [:binded-gamepad-cmds :A]))
-        :B (parse-cmd (get-in @session-info [:binded-gamepad-cmds :B]))
-        :X (parse-cmd (get-in @session-info [:binded-gamepad-cmds :X]))
-        :Y (parse-cmd (get-in @session-info [:binded-gamepad-cmds :Y]))
-        :rxA (parse-cmd (get-in @session-info [:binded-gamepad-cmds :rxA]))
-        :rxB (parse-cmd (get-in @session-info [:binded-gamepad-cmds :rxB]))
-        :rxX (parse-cmd (get-in @session-info [:binded-gamepad-cmds :rxX]))
-        :rxY (parse-cmd (get-in @session-info [:binded-gamepad-cmds :rxY]))
-        :left-bumper (parse-cmd (get-in @session-info [:binded-gamepad-cmds :left-bumper]))
-        :right-bumper (parse-cmd (get-in @session-info [:binded-gamepad-cmds :right-bumper]))
+        :A (parse-cmd (get-in @session-state [:binded-gamepad-cmds :A]))
+        :B (parse-cmd (get-in @session-state [:binded-gamepad-cmds :B]))
+        :X (parse-cmd (get-in @session-state [:binded-gamepad-cmds :X]))
+        :Y (parse-cmd (get-in @session-state [:binded-gamepad-cmds :Y]))
+        :rxA (parse-cmd (get-in @session-state [:binded-gamepad-cmds :rxA]))
+        :rxB (parse-cmd (get-in @session-state [:binded-gamepad-cmds :rxB]))
+        :rxX (parse-cmd (get-in @session-state [:binded-gamepad-cmds :rxX]))
+        :rxY (parse-cmd (get-in @session-state [:binded-gamepad-cmds :rxY]))
+        :left-bumper (parse-cmd (get-in @session-state [:binded-gamepad-cmds :left-bumper]))
+        :right-bumper (parse-cmd (get-in @session-state [:binded-gamepad-cmds :right-bumper]))
         :back nil
         :start nil
         :xbox-guide nil
