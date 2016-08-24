@@ -52,9 +52,7 @@
 (def log (atom []))
 (def session-state
   (atom
-   {:tab-complete {:tab-complete-set #{}
-                   :tab-complete-word ""
-                   :tab-complete-tab-count 0}
+   {:tab-complete-set '() 
     :key-press-history '()
     :mode :input-key
     :hp "unknown"
@@ -160,19 +158,22 @@
                           :content main-panel))
 
 (s/listen input-textbox :key-pressed
-          (fn [e] (swap! session-state
-                         update
-                         :key-press-history
-                         conj (.getKeyCode e))))
-;; (KeyEvent/VK_TAB)
+          (fn [e]
+            (let [keycode (.getKeyCode e)
+                  prev-key (-> @session-state
+                               (:key-press-history)
+                               (first))] 
+              (condp = keycode
+                (KeyEvent/VK_TAB) (tab-complete (s/text input-textbox)
+                                                (= keycode prev-key)) 
+                (KeyEvent/VK_ENTER) (do (parse-cmd (s/config input-textbox :text))
+                                        (s/config! input-textbox :text ""))
+                nil)
+              (swap! session-state
+                     update
+                     :key-press-history
+                     conj keycode))))
 
-(m/map-key input-textbox "TAB" (fn [e] (-> (s/config input-textbox
-                                                     :text)
-                                           (clojure.string/split #" ")
-                                           (last)
-                                           (tab-complete))))
-(m/map-key input-textbox "ENTER" (fn [e] (do (parse-cmd (s/config input-textbox :text))
-                                             (s/config! input-textbox :text ""))))
 
 (-> main-window s/pack! s/show!)
 
@@ -247,38 +248,33 @@
              (last (take (@cmd-buffer :pointer)
                          (@cmd-buffer :history)))))
 
+(defn put-match-and-update-state
+  [pre-key match-set]
+  (s/text! input-textbox
+           (str pre-key
+                " "
+                (first match-set)))
+  (swap! session-state
+         assoc
+         :tab-complete-set (rest match-set)))
 
-(defn tab-complete [cmd]
-  (if (not= cmd
-            (get-in @session-state
-                    [:tab-complete :tab-complete-word]))
-    (swap! session-state
-           update
-           :tab-complete
-           assoc
-           :tab-complete-word cmd
-           :tab-complete-tab-count 0)
-    (swap! session-state
-           update-in
-           [:tab-complete :tab-complete-tab-count] 
-           inc))
-
-
-
-  ;; (let [prev-key (second @key-stroke-buffer)
-  ;;       search-regex (re-pattern (str "\\b"
-  ;;                                     (last (clojure.string/split
-  ;;                                            @key-buffer #" "))
-  ;;                                     "\\w+"))]
-  ;;   (if (= prev-key :tab)
-  ;;     (swap! tab-complete-list (comp set rest))
-  ;;     (->> (.getText server-output-pane)
-  ;;          (re-seq search-regex)
-  ;;          (set)
-  ;;          (reset! tab-complete-list)))
-  ;;   (key-buffer-replace-last-word (first @tab-complete-list))
-  ;;   (print-key-buffer))
-  )
+(defn tab-complete [input-text tab-again?]
+  (let [words (clojure.string/split input-text
+                                    #" ")
+        pre-key (clojure.string/join " "
+                                     (butlast words))]
+    (if tab-again?
+      (let [match-set (@session-state :tab-complete-set)]
+        (put-match-and-update-state pre-key match-set))
+      (let [search-key (last words) 
+            key-pattern (re-pattern (str "\\b"
+                                         search-key
+                                         "\\w+"))
+            match-set (->> (.getText server-output-pane)
+                           (re-seq key-pattern)
+                           (set)
+                           (into '()))]
+        (put-match-and-update-state pre-key match-set)))))
 
 (defn update-word [func]
   (let [curr-object (@session-state :curr-object)
