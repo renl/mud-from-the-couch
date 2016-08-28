@@ -4,60 +4,91 @@
          }
  :trigger [
 
-           ;; [#"Obvious exits:.+\r?\n(?:.*\r?\n)*?< .+ >"
-           ;;  (fn [objects]
-           ;;    (->> objects
-           ;;         (clojure.string/split-lines)
-           ;;         (rest)
-           ;;         (butlast)
-           ;;         (take-last 20)
-           ;;         (vec)
-           ;;         (swap! session-info assoc :objects))
-           ;;    (swap! session-info assoc :select-index 0)
-           ;;    (>!! render-chan
-           ;;         #(render-objectsbox term-output
-           ;;                             0 37 102 12
-           ;;                             :magenta :black :white
-           ;;                             (@session-info :objects)
-           ;;                             (@session-info :select-index))))]
+           [#"Obvious exits:.+\r?\n(?:.*\r?\n)*?< .+ >"
+            (fn [objects]
+              (let [object-list (->> objects
+                                     (clojure.string/split-lines)
+                                     (rest)
+                                     (butlast)
+                                     (take-last 20)
+                                     (vec))]
+                (swap! session-state assoc :objects object-list)
+                (swap! session-state assoc :select-index 0)
+                (s/text! sel-object-pane (first object-list))
+                (s/text! objects-pane
+                         (clojure.string/join \newline
+                                              (update object-list
+                                                      0
+                                                      #(str "[[" % "]]"))))))]
 
-           ;; [#"Obvious exits:(.+)"
-           ;;  (fn [[_ exits]]
-           ;;    (swap! session-info assoc :exits
-           ;;           (map (fn [[_ exit]]
-           ;;                  exit)
-           ;;                (re-seq #"\-(\w+)" exits)))
-           ;;    (>!! render-chan
-           ;;         #(render-exitsbox term-output
-           ;;                           102 14 31 11
-           ;;                           :cyan :black :white
-           ;;                           @session-info)))]
+           [#"Obvious exits:(.+)"
+            (fn [[_ exits]]
+              (let [exit-set (set (map (fn [[_ exit]]
+                                           exit)
+                                         (re-seq #"\-(\w+)" exits)))
+                    exit-str ["     " "     " "     " "     " "     " "     " "    " \newline
+                              "     " "     " "  |  " "     " "     " "     " "    " \newline
+                              "     " "     " "--|--" "     " "     " "     " "----" \newline
+                              "     " "     " "  |  " "     " "     " "     " "    " \newline
+                              "     " "     " "     " "     " "     " "     " "    "]
+                    exit-str (apply str
+                                    (assoc exit-str
+                                           0 (if (contains? exit-set "Northwest")
+                                               "NWest"
+                                               "     ")
+                                           2 (if (contains? exit-set "North")
+                                               "North"
+                                               "     ")
+                                           4 (if (contains? exit-set "Northeast")
+                                               "NEast"
+                                               "     ")
+                                           14 (if (contains? exit-set "Up")
+                                                " Up "
+                                                "     ")
+                                           16 (if (contains? exit-set "West")
+                                                "West "
+                                                "     ")
+                                           20 (if (contains? exit-set "East")
+                                                " East"
+                                                "     ")
+                                           30 (if (contains? exit-set "Down")
+                                                "Down"
+                                                "     ")
+                                           32 (if (contains? exit-set "Southwest")
+                                                "SWest"
+                                                "     ")
+                                           34 (if (contains? exit-set "South")
+                                                "South"
+                                                "     ")
+                                           36 (if (contains? exit-set "Southeast")
+                                                "SEast"
+                                                "     ")))] 
+                (s/text! exits-pane exit-str)))]
            
-           ;; [#"< ([0-9]+)h/([0-9]+)H ([0-9]+)v/([0-9]+)V Pos: ([a-zA-Z]+) >"
-           ;;  (fn [[_ hp max-hp mv max-mv pos]]
-           ;;    (swap! session-info assoc :hp hp)
-           ;;    (swap! session-info assoc :max-hp max-hp)
-           ;;    (swap! session-info assoc :mv mv)
-           ;;    (swap! session-info assoc :max-mv max-mv)
-           ;;    (swap! session-info assoc :pos pos)
-           ;;    (>!! render-chan
-           ;;         #(render-statusbox term-output
-           ;;                            102 5 50 9
-           ;;                            :green :black :white
-           ;;                            @session-info)))]
+           [#"< ([0-9]+)h/([0-9]+)H ([0-9]+)v/([0-9]+)V Pos: ([a-zA-Z]+) >"
+            (fn [[_ hp max-hp mv max-mv pos]]
+              (swap! session-state assoc :hp hp)
+              (swap! session-state assoc :max-hp max-hp)
+              (swap! session-state assoc :mv mv)
+              (swap! session-state assoc :max-mv max-mv)
+              (swap! session-state assoc :pos pos)
+              (s/text! status-pane (str hp "/" max-hp \newline
+                                        mv "/" max-mv \newline
+                                        \newline
+                                        pos)))]
            
-           ;; [#"You lose your footing and fall to your knees!"
-           ;;  (fn [_] (>!! cmd-chan "st"))]
+           [#"You lose your footing and fall to your knees!"
+            (fn [_] (>!! cmd-chan "st"))]
            
-           ;; [#"Your basic stats:"
-           ;;  (fn [_] (swap! client-mods assoc :stat-counter 0))]
+           [#"Your basic stats:"
+            (fn [_] (swap! client-mods assoc :stat-counter 0))]
 
-           ;; [#"very good"
-           ;;  (fn [_] (swap! client-mods update :stat-counter inc))]
+           [#"very good"
+            (fn [_] (swap! client-mods update :stat-counter inc))]
 
-           ;; [#"Do you want to reroll"
-           ;;  (fn [_] (let [cnt (@client-mods :stat-counter)]
-           ;;            (println "Very good count: " cnt)
-           ;;            (if (< cnt 3)
-           ;;              (>!! cmd-chan "y"))))]
+           [#"Do you want to reroll"
+            (fn [_] (let [cnt (@client-mods :stat-counter)]
+                      (println "Very good count: " cnt)
+                      (if (< cnt 3)
+                        (>!! cmd-chan "y"))))]
            ]}

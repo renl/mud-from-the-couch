@@ -1,14 +1,9 @@
 (ns mud-from-the-couch.core
-  (:require [lanterna.terminal :as t]
-            [seesaw.core :as s]
+  (:require [seesaw.core :as s]
             [seesaw.dev :as d]
             [seesaw.keystroke :as k]
             [seesaw.keymap :as m]
-            [mud-from-the-couch.guirender :refer [render-messagebox
-                                                  render-statusbox
-                                                  render-exitsbox
-                                                  render-objectsbox
-                                                  render-selected-objectbox]]
+            [seesaw.font :as f] 
             [mud-from-the-couch.ansicode :refer [generate-markup
                                                  parse-markup
                                                  remove-ansi-escape-code]]
@@ -25,12 +20,16 @@
 
 (declare parse-cmd
          cmd-chan
-         term-output
          prev-obj
          prev-word
          next-obj
          next-word
-         tab-complete)
+         tab-complete
+         exits-pane
+         status-pane
+         objects-pane
+         sel-object-pane
+         message-pane)
 
 
 ;; Async channel
@@ -39,7 +38,6 @@
 (def key-stroke-chan (chan))
 (def cmd-chan (chan))
 (def trigger-chan (chan))
-(def render-chan (chan))
 
 
 ;; App states
@@ -60,7 +58,6 @@
     :mv "unknown"
     :max-mv "unknown"
     :pos "unknown"
-    :exits []
     :objects []
     :select-index 0
     :curr-object []
@@ -125,20 +122,63 @@
 (def server-output-pane
   (s/styled-text :text "Hello world"
                  :wrap-lines? true
-                 :preferred-size [640 :by 640]
+                 :size [640 :by 640]
                  :editable? false
                  :background :black
                  :foreground :white
                  :styles styles))
 
-(def info-pane
+(def info-pane (s/vertical-panel))
+
+(def exits-pane
   (s/styled-text :text "" 
-                 :wrap-lines? true
-                 :preferred-size [640 :by 640]
                  :editable? false
+                 :size [640 :by 120]
                  :background :black
                  :foreground :white
+                 :styles styles
+                 :font (f/font :monospaced)))
+
+(s/add! info-pane exits-pane)
+
+(def status-pane
+  (s/styled-text :text "" 
+                 :editable? false
+                 :size [640 :by 120]                 
+                 :background "#101010"
+                 :foreground :white
                  :styles styles))
+
+(s/add! info-pane status-pane)
+
+(def message-pane
+  (s/styled-text :text "" 
+                 :editable? false
+                 :size [640 :by 60]
+                 :background "#404040"
+                 :foreground :white
+                 :styles styles))
+
+(s/add! info-pane message-pane)
+
+(def sel-object-pane
+  (s/styled-text :text "" 
+                 :editable? false
+                 :size [640 :by 60]
+                 :background "#303030"
+                 :foreground :white
+                 :styles styles))
+
+(s/add! info-pane sel-object-pane)
+
+(def objects-pane
+  (s/styled-text :text "" 
+                 :editable? false
+                 :background "#202020"
+                 :foreground :white
+                 :styles styles))
+
+(s/add! info-pane objects-pane)
 
 (def display-area
   (s/left-right-split (s/scrollable server-output-pane)
@@ -157,7 +197,8 @@
 (def main-window (s/frame :title "mud on the couch"
                           :content main-panel))
 
-(s/listen input-textbox :key-pressed
+(s/listen input-textbox
+          :key-pressed
           (fn [e]
             (let [keycode (.getKeyCode e)
                   prev-key (-> @session-state
@@ -166,8 +207,9 @@
               (condp = keycode
                 (KeyEvent/VK_TAB) (tab-complete (s/text input-textbox)
                                                 (= keycode prev-key)) 
-                (KeyEvent/VK_ENTER) (do (parse-cmd (s/config input-textbox :text))
-                                        (s/config! input-textbox :text ""))
+                (KeyEvent/VK_ENTER) (do (parse-cmd (s/text input-textbox))
+                                        (s/text! input-textbox
+                                                 ""))
                 nil)
               (swap! session-state
                      update
@@ -202,27 +244,6 @@
 ;; =============================================================================
 (def ips (.getInputStream tc))
 (def ops (.getOutputStream tc))
-
-
-
-
-;; Terminals
-;; =============================================================================
-(def term-input (t/get-terminal
-                 :swing
-                 {:cols 80
-                  :rows 1
-                  :palette :gnome}))
-
-(def term-output (t/get-terminal
-                  ;; :unix
-                  :swing
-                  {
-                   :cols 160
-                   :rows 50
-                   :palette :mac-os-x}))
-
-
 
 
 ;; Functions
@@ -281,23 +302,18 @@
         curr-ind (func (@session-state :word-index))]
     (when (and (< curr-ind (count curr-object))
                (>= curr-ind 0))
-      (let [curr-target (curr-object curr-ind)]
+      (let [curr-target (curr-object curr-ind)
+            highlighted-object (update curr-object
+                                       curr-ind
+                                       #(str "[[" % "]]"))]
         (swap! session-state assoc :word-index curr-ind)
         (swap! session-state assoc :selected-target curr-target)
-        (>!! render-chan
-             #(render-selected-objectbox term-output
-                                         5 5 145 5
-                                         :magenta :yellow :black
-                                         curr-object
-                                         curr-ind))
-        (>!! render-chan
-             #(render-messagebox term-output
-                                 102 0 50 5
-                                 :red :black :white
-                                 (str "Target: "
-                                      (@session-state :target-prefix)
-                                      "."
-                                      curr-target)))))))
+        (s/text! sel-object-pane (clojure.string/join " "
+                                                      highlighted-object))
+        (s/text! message-pane (str "Target: "
+                                   (@session-state :target-prefix)
+                                   "."
+                                   curr-target))))))
 
 (defn prev-word []
   (update-word dec))
@@ -307,24 +323,26 @@
 
 
 (defn update-obj [func]
-  (if (= func inc)
-    (swap! session-state update
-           :select-index
-           #(if (< % (dec (count (@session-state :objects)))) (func %) %))
-    (swap! session-state update
-           :select-index
-           #(if (> % 0) (func %) %)))
-  (swap! session-state assoc
-         :curr-object
-         (clojure.string/split
-          (get-in @session-state
-                  [:objects (@session-state :select-index)]) #" "))
-  (>!! render-chan
-       #(render-objectsbox term-output
-                           0 37 102 12
-                           :magenta :black :white
-                           (@session-state :objects)
-                           (@session-state :select-index))))
+  (if (not-empty (@session-state :objects))
+    (let [n (func (@session-state :select-index))
+          m (dec (count (@session-state :objects)))
+          curr-index (cond
+                       (< n 0) 0
+                       (> n m) m
+                       :else n)
+          curr-object (clojure.string/split
+                       (get-in @session-state
+                               [:objects curr-index]) #" ")
+          object-list (@session-state :objects)]
+      (swap! session-state assoc :select-index curr-index)
+      (swap! session-state assoc :curr-object curr-object)
+      (s/text! sel-object-pane (get-in @session-state [:objects curr-index]))
+      (s/text! objects-pane
+               (clojure.string/join \newline
+                                    (update object-list
+                                            curr-index
+                                            (fn [s]
+                                              (str "[[" s "]]"))))))))
 
 (defn prev-obj []
   (update-obj dec))
@@ -332,8 +350,7 @@
 (defn next-obj []
   (update-obj inc))
 
-(defn parse-cmd [cmd]
-  (println "Parsing cmd: " cmd)
+(defn parse-cmd [cmd] 
   (if-let [alias-cmd (check-alias cmd)]
     (>!! cmd-chan alias-cmd)
     (case cmd
@@ -381,26 +398,18 @@
                         (let [curr-object (@session-state :curr-object)
                               curr-ind (@session-state :word-index)
                               curr-target (curr-object curr-ind)]
-                          (>!! render-chan
-                               #(render-messagebox term-output
-                                                   102 0 50 5
-                                                   :red :black :white
-                                                   (str "Target: "
-                                                        (@session-state :target-prefix)
-                                                        "."
-                                                        curr-target)))))
+                          (s/text! message-pane (str "Target: "
+                                                     (@session-state :target-prefix)
+                                                     "."
+                                                     curr-target))))
       "#dec-prefix" (do (swap! session-state update :target-prefix dec)
                         (let [curr-object (@session-state :curr-object)
                               curr-ind (@session-state :word-index)
                               curr-target (curr-object curr-ind)]
-                          (>!! render-chan
-                               #(render-messagebox term-output
-                                                   102 0 50 5
-                                                   :red :black :white
-                                                   (str "Target: "
-                                                        (@session-state :target-prefix)
-                                                        "."
-                                                        curr-target)))))
+                          (s/text! message-pane (str "Target: "
+                                                     (@session-state :target-prefix)
+                                                     "."
+                                                     curr-target))))
       "#load" (reset! client-mods (eval
                                    (read-string
                                     (slurp "resources/slurp.edn"))))
@@ -440,7 +449,7 @@
 (defn handle-triggers []
   (while @running
     (let [triggers (@client-mods :trigger)
-          buf (<!! trigger-chan)]
+          buf (<!! trigger-chan)] 
       (dorun
        (map (re-to-act buf) triggers))))
   (prn "Stopping trigger handlers"))
